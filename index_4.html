@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MegaClean · Control de Horas</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1114;
+    --surface: #181c21;
+    --surface2: #1f252c;
+    --border: #2a3240;
+    --accent: #00b4d8;
+    --accent2: #0077b6;
+    --green: #2dc653;
+    --red: #e63946;
+    --yellow: #f4a261;
+    --text: #e8edf2;
+    --text2: #7a8899;
+    --text3: #4a5568;
+    --radius: 10px;
+    --font-display: 'Barlow Condensed', sans-serif;
+    --font-body: 'Barlow', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-body); overflow-x: hidden; }
+
+  /* ── UTILS ── */
+  .hidden { display: none !important; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
+  .pill-green { background: rgba(45,198,83,.15); color: var(--green); border: 1px solid rgba(45,198,83,.3); }
+  .pill-red { background: rgba(230,57,70,.15); color: var(--red); border: 1px solid rgba(230,57,70,.3); }
+  .pill-yellow { background: rgba(244,162,97,.15); color: var(--yellow); border: 1px solid rgba(244,162,97,.3); }
+  .pill-blue { background: rgba(0,180,216,.15); color: var(--accent); border: 1px solid rgba(0,180,216,.3); }
+  .pill-gray { background: rgba(122,136,153,.1); color: var(--text2); border: 1px solid var(--border); }
+
+  /* ── TOAST ── */
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 12px 20px; border-radius: var(--radius); font-size: 13px; z-index: 9999; transition: transform .3s ease; white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── LOADER ── */
+  #loader { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 9000; flex-direction: column; gap: 16px; }
+  .loader-logo { font-family: var(--font-display); font-size: 28px; font-weight: 900; letter-spacing: 3px; color: var(--accent); }
+  .loader-bar { width: 120px; height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .loader-bar::after { content: ''; display: block; width: 40%; height: 100%; background: var(--accent); animation: loadSlide 1s ease infinite; }
+  @keyframes loadSlide { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+
+  /* ── LOGIN ── */
+  #screen-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: radial-gradient(ellipse at 50% 0%, rgba(0,119,182,.12) 0%, transparent 60%); }
+  .login-logo { font-family: var(--font-display); font-size: 38px; font-weight: 900; letter-spacing: 4px; color: var(--accent); margin-bottom: 4px; }
+  .login-sub { font-size: 12px; letter-spacing: 3px; color: var(--text3); text-transform: uppercase; margin-bottom: 40px; }
+  .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px 24px; }
+  .login-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text2); letter-spacing: 1px; margin-bottom: 24px; text-transform: uppercase; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; margin-bottom: 6px; }
+  .field input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 16px; padding: 12px 14px; border-radius: var(--radius); outline: none; transition: border-color .2s; }
+  .field input:focus { border-color: var(--accent); }
+  .btn-primary { width: 100%; background: var(--accent); color: #fff; font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; border: none; border-radius: var(--radius); padding: 14px; cursor: pointer; transition: background .2s, transform .1s; margin-top: 8px; }
+  .btn-primary:active { transform: scale(.98); }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-secondary { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; border-radius: var(--radius); padding: 11px 18px; cursor: pointer; transition: all .2s; }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: rgba(230,57,70,.1); color: var(--red); border: 1px solid rgba(230,57,70,.3); font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; border-radius: var(--radius); padding: 11px 18px; cursor: pointer; transition: all .2s; }
+  .btn-green { background: var(--green); color: #fff; border: none; font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; border-radius: 14px; padding: 18px; cursor: pointer; transition: all .2s; }
+  .btn-red-big { background: var(--red); color: #fff; border: none; font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; border-radius: 14px; padding: 18px; cursor: pointer; transition: all .2s; }
+
+  /* ── MAIN LAYOUT ── */
+  #app { display: flex; flex-direction: column; min-height: 100vh; }
+  .topbar { position: sticky; top: 0; z-index: 100; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+  .topbar-logo { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 3px; color: var(--accent); }
+  .topbar-user { display: flex; align-items: center; gap: 10px; }
+  .topbar-name { font-size: 13px; color: var(--text2); font-weight: 500; }
+  .topbar-role { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
+  .btn-logout { background: none; border: 1px solid var(--border); color: var(--text3); font-size: 12px; padding: 5px 10px; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .btn-logout:hover { border-color: var(--red); color: var(--red); }
+
+  /* ── TABS ── */
+  .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 1; min-width: 80px; padding: 14px 8px 12px; text-align: center; font-family: var(--font-display); font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; white-space: nowrap; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-icon { font-size: 18px; display: block; margin-bottom: 2px; }
+
+  /* ── CONTENT ── */
+  .content { flex: 1; padding: 16px; max-width: 640px; margin: 0 auto; width: 100%; }
+  .section-title { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; color: var(--text); margin-bottom: 4px; }
+  .section-sub { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+
+  /* ── FICHAR (OPERARIO) ── */
+  .fecha-hoy { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .fecha-label { font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; }
+  .fecha-valor { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text); }
+  .reloj { font-family: var(--font-display); font-size: 36px; font-weight: 900; color: var(--accent); letter-spacing: 2px; }
+
+  .servicio-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; transition: border-color .2s; }
+  .servicio-card.activo { border-color: var(--green); background: rgba(45,198,83,.04); }
+  .servicio-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+  .servicio-cliente { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+  .servicio-dir { font-size: 13px; color: var(--text2); margin-top: 2px; }
+  .servicio-horario { font-size: 13px; color: var(--text3); margin-top: 6px; }
+  .servicio-horario span { color: var(--accent); font-weight: 600; }
+  .servicio-actions { display: flex; gap: 10px; margin-top: 12px; }
+  .servicio-actions button { flex: 1; padding: 12px; border-radius: var(--radius); font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; border: none; transition: all .2s; }
+  .btn-entrar { background: var(--green); color: #fff; }
+  .btn-salir { background: var(--red); color: #fff; }
+  .btn-entrar:disabled, .btn-salir:disabled { opacity: .4; cursor: not-allowed; }
+
+  .fichada-info { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 12px; color: var(--text2); }
+  .fichada-row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .fichada-row .val { color: var(--text); font-weight: 600; }
+  .gps-ok { color: var(--green); }
+  .gps-warn { color: var(--yellow); }
+
+  .no-servicios { text-align: center; padding: 40px 20px; color: var(--text3); }
+  .no-servicios .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── ADMIN PANEL ── */
+  .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .stat-num { font-family: var(--font-display); font-size: 36px; font-weight: 900; color: var(--accent); }
+  .stat-label { font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; margin-top: 2px; }
+
+  .card-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card-section-title { font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field-sm { margin-bottom: 10px; }
+  .field-sm label { display: block; font-size: 10px; font-weight: 600; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
+  .field-sm input, .field-sm select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 14px; padding: 9px 12px; border-radius: 8px; outline: none; }
+  .field-sm input:focus, .field-sm select:focus { border-color: var(--accent); }
+  .field-sm select option { background: var(--bg); }
+
+  .dias-check { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .dia-btn { padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: .5px; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .dia-btn.sel { background: rgba(0,180,216,.15); border-color: var(--accent); color: var(--accent); }
+
+  /* ── LIST ITEMS ── */
+  .list-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .list-item:last-child { border-bottom: none; }
+  .list-item-info { flex: 1; }
+  .list-item-name { font-weight: 600; font-size: 15px; }
+  .list-item-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .list-item-actions { display: flex; gap: 8px; }
+  .btn-icon { background: var(--bg); border: 1px solid var(--border); color: var(--text2); width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 15px; transition: all .2s; }
+  .btn-icon:hover { border-color: var(--red); color: var(--red); }
+  .btn-icon.edit:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── SUPERVISOR ── */
+  .fichada-supervisor { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+  .fs-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .fs-operario { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+  .fs-detalle { font-size: 12px; color: var(--text2); display: flex; flex-direction: column; gap: 3px; }
+  .fs-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+  /* ── MIS HORAS ── */
+  .resumen-mes { background: linear-gradient(135deg, rgba(0,180,216,.1), rgba(0,119,182,.05)); border: 1px solid rgba(0,180,216,.2); border-radius: 12px; padding: 20px 16px; margin-bottom: 16px; text-align: center; }
+  .resumen-num { font-family: var(--font-display); font-size: 56px; font-weight: 900; color: var(--accent); line-height: 1; }
+  .resumen-label { font-size: 13px; color: var(--text2); letter-spacing: 2px; text-transform: uppercase; margin-top: 4px; }
+  .resumen-tipo { font-size: 11px; color: var(--text3); margin-top: 8px; }
+
+  /* ── MODAL ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 500; display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px 16px 12px 12px; width: 100%; max-width: 480px; padding: 24px 20px; max-height: 90vh; overflow-y: auto; }
+  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-actions button { flex: 1; }
+
+  /* ── RESPONSIVE ── */
+  @media(max-width: 380px) {
+    .admin-grid { grid-template-columns: 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOADER -->
+<div id="loader">
+  <div class="loader-logo">MEGACLEAN</div>
+  <div style="font-size:11px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-top:-8px;">Control de Horas</div>
+  <div class="loader-bar"></div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- LOGIN -->
+<div id="screen-login" class="hidden">
+  <div class="login-logo">MEGACLEAN</div>
+  <div class="login-sub">Control de Horas</div>
+  <div class="login-card">
+    <div class="login-title">Ingresar</div>
+    <div class="field">
+      <label>DNI</label>
+      <input type="number" id="login-dni" placeholder="Ej: 30123456" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" placeholder="••••••••">
+    </div>
+    <button class="btn-primary" onclick="doLogin()">ENTRAR</button>
+  </div>
+</div>
+
+<!-- APP MAIN -->
+<div id="app" class="hidden">
+  <div class="topbar">
+    <div class="topbar-logo">MEGACLEAN</div>
+    <div class="topbar-user">
+      <div>
+        <div class="topbar-name" id="topbar-name">—</div>
+        <div class="topbar-role" id="topbar-role">—</div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">Salir</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="main-tabs"></div>
+
+  <div class="content" id="main-content"></div>
+</div>
+
+<!-- MODALES -->
+<div id="modal-container"></div>
+
+<script>
+// ════════════════════════════════════════════
+//  FIREBASE CONFIG
+// ════════════════════════════════════════════
+const FB_CONFIG = {
+  apiKey: "AIzaSyBg7lvQteU0aHwEyI1qe10UPK81-9DL0Ng",
+  authDomain: "mega-clean-12f17.firebaseapp.com",
+  projectId: "mega-clean-12f17",
+  storageBucket: "mega-clean-12f17.appspot.com",
+  messagingSenderId: "395826988",
+  appId: "mega-clean-12f17"
+};
+const API = `https://firestore.googleapis.com/v1/projects/${FB_CONFIG.projectId}/databases/(default)/documents`;
+
+// ════════════════════════════════════════════
+//  ESTADO GLOBAL
+// ════════════════════════════════════════════
+let currentUser = null;
+let reloj_interval = null;
+const DIAS_SEMANA = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM'];
+const DIAS_FULL = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const DIAS_JS = [1,2,3,4,5,6,0]; // getDay() map
+
+// ════════════════════════════════════════════
+//  FIRESTORE HELPERS
+// ════════════════════════════════════════════
+function toFS(data) {
+  const fields = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v === null || v === undefined) fields[k] = { nullValue: null };
+    else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
+    else if (typeof v === 'number') fields[k] = { integerValue: String(v) };
+    else if (typeof v === 'string') fields[k] = { stringValue: v };
+    else if (Array.isArray(v)) fields[k] = { arrayValue: { values: v.map(i => typeof i === 'string' ? { stringValue: i } : { integerValue: String(i) }) } };
+    else fields[k] = { stringValue: JSON.stringify(v) };
+  }
+  return { fields };
+}
+
+function fromFS(doc) {
+  if (!doc.fields) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(doc.fields)) {
+    if (v.stringValue !== undefined) out[k] = v.stringValue;
+    else if (v.integerValue !== undefined) out[k] = Number(v.integerValue);
+    else if (v.doubleValue !== undefined) out[k] = v.doubleValue;
+    else if (v.booleanValue !== undefined) out[k] = v.booleanValue;
+    else if (v.nullValue !== undefined) out[k] = null;
+    else if (v.arrayValue) out[k] = (v.arrayValue.values || []).map(i => i.stringValue ?? i.integerValue ?? i.booleanValue);
+    else out[k] = null;
+  }
+  out._id = doc.name?.split('/').pop();
+  return out;
+}
+
+async function fsGet(col, id) {
+  const r = await fetch(`${API}/${col}/${id}`);
+  if (!r.ok) return null;
+  return fromFS(await r.json());
+}
+
+async function fsList(col, filter) {
+  let url = `${API}/${col}?pageSize=200`;
+  const r = await fetch(url);
+  if (!r.ok) return [];
+  const data = await r.json();
+  if (!data.documents) return [];
+  return data.documents.map(fromFS);
+}
+
+async function fsSave(col, id, data) {
+  const body = toFS(data);
+  const mask = Object.keys(data).map(k => `updateMask.fieldPaths=${k}`).join('&');
+  const r = await fetch(`${API}/${col}/${id}?${mask}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  return r.ok;
+}
+
+async function fsAdd(col, data) {
+  const r = await fetch(`${API}/${col}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(toFS(data))
+  });
+  const d = await r.json();
+  return d.name?.split('/').pop();
+}
+
+async function fsDelete(col, id) {
+  await fetch(`${API}/${col}/${id}`, { method: 'DELETE' });
+}
+
+// ════════════════════════════════════════════
+//  TOAST
+// ════════════════════════════════════════════
+function toast(msg, type = 'info') {
+  const t = document.getElementById('toast');
+  const colors = { info: 'var(--accent)', ok: 'var(--green)', error: 'var(--red)', warn: 'var(--yellow)' };
+  t.style.borderColor = colors[type] || colors.info;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ════════════════════════════════════════════
+//  AUTH
+// ════════════════════════════════════════════
+async function doLogin() {
+  const dni = document.getElementById('login-dni').value.trim();
+  const pass = document.getElementById('login-pass').value.trim();
+  if (!dni || !pass) return toast('Ingresá DNI y contraseña', 'warn');
+
+  // Admin hardcoded
+  if (dni === 'ADMIN' || dni === '0') {
+    if (pass === 'mega2024') {
+      currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni: 'ADMIN' };
+      iniciarApp();
+      return;
+    }
+  }
+
+  showLoader(true);
+  const users = await fsList('horas_usuarios');
+  showLoader(false);
+  const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
+  if (!user) return toast('DNI o contraseña incorrectos', 'error');
+  currentUser = user;
+  iniciarApp();
+}
+
+function doLogout() {
+  currentUser = null;
+  if (reloj_interval) clearInterval(reloj_interval);
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('screen-login').classList.remove('hidden');
+  document.getElementById('login-dni').value = '';
+  document.getElementById('login-pass').value = '';
+}
+
+function iniciarApp() {
+  document.getElementById('screen-login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbar-name').textContent = currentUser.nombre;
+  document.getElementById('topbar-role').textContent = currentUser.rol;
+  renderTabs();
+  navigateTo(currentUser.rol === 'OPERARIO' ? 'fichar' : currentUser.rol === 'SUPERVISOR' ? 'supervisor' : 'dashboard');
+}
+
+// ════════════════════════════════════════════
+//  NAVIGATION
+// ════════════════════════════════════════════
+const TABS = {
+  ADMIN: [
+    { id: 'dashboard', icon: '📊', label: 'Dashboard' },
+    { id: 'operarios', icon: '👷', label: 'Operarios' },
+    { id: 'servicios', icon: '🏢', label: 'Servicios' },
+    { id: 'fichadas', icon: '📋', label: 'Fichadas' },
+  ],
+  SUPERVISOR: [
+    { id: 'supervisor', icon: '🔍', label: 'Control' },
+    { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
+  ],
+  OPERARIO: [
+    { id: 'fichar', icon: '📍', label: 'Fichar' },
+    { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
+  ]
+};
+
+let activeTab = '';
+
+function renderTabs() {
+  const tabs = TABS[currentUser.rol] || TABS.OPERARIO;
+  const container = document.getElementById('main-tabs');
+  container.innerHTML = tabs.map(t => `
+    <div class="tab" id="tab-${t.id}" onclick="navigateTo('${t.id}')">
+      <span class="tab-icon">${t.icon}</span>${t.label}
+    </div>`).join('');
+}
+
+function navigateTo(id) {
+  activeTab = id;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const tab = document.getElementById('tab-' + id);
+  if (tab) tab.classList.add('active');
+  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor };
+  if (screens[id]) screens[id]();
+}
+
+function showLoader(v) {
+  document.getElementById('loader').style.display = v ? 'flex' : 'none';
+}
+
+// ════════════════════════════════════════════
+//  HELPERS
+// ════════════════════════════════════════════
+function fechaHoy() {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
+function isoHoy() {
+  return new Date().toISOString().split('T')[0];
+}
+function horaActual() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function horaCompleta() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+function diasHoy() {
+  // retorna índice 0..6 (LUN=0..DOM=6)
+  const js = new Date().getDay(); // 0=dom,1=lun...
+  return DIAS_JS.indexOf(js);
+}
+function diffHoras(entrada, salida) {
+  const [h1,m1] = entrada.split(':').map(Number);
+  const [h2,m2] = salida.split(':').map(Number);
+  return ((h2*60+m2) - (h1*60+m1)) / 60;
+}
+function distanciaMetros(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLon = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: FICHAR (OPERARIO)
+// ════════════════════════════════════════════
+async function renderFichar() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Fichar</div>
+  <div class="section-sub">Marcá tu entrada y salida en cada servicio</div>
+  <div class="fecha-hoy">
+    <div><div class="fecha-label">Hoy</div><div class="fecha-valor">${fechaHoy()}</div></div>
+    <div class="reloj" id="reloj-live">--:--:--</div>
+  </div>
+  <div id="servicios-hoy"><div style="text-align:center;padding:30px;color:var(--text3)">Cargando servicios...</div></div>`;
+
+  if (reloj_interval) clearInterval(reloj_interval);
+  reloj_interval = setInterval(() => {
+    const el = document.getElementById('reloj-live');
+    if (el) el.textContent = horaCompleta();
+    else clearInterval(reloj_interval);
+  }, 1000);
+  document.getElementById('reloj-live').textContent = horaCompleta();
+
+  await cargarServiciosHoy();
+}
+
+async function cargarServiciosHoy() {
+  const servicios = await fsList('horas_servicios');
+  const diaIdx = diasHoy();
+  const diaStr = DIAS_SEMANA[diaIdx];
+
+  // filtrar los que corresponden hoy y a este operario
+  const serviciosHoy = servicios.filter(s => {
+    const dias = s.dias || [];
+    const operariosIds = s.operarios ? (Array.isArray(s.operarios) ? s.operarios : s.operarios.split(',')) : [];
+    return dias.includes(diaStr) && (operariosIds.includes(currentUser._id) || operariosIds.includes(String(currentUser._id)));
+  });
+
+  // cargar fichadas de hoy para este operario
+  const todasFichadas = await fsList('horas_fichadas');
+  const fichadasHoy = todasFichadas.filter(f => f.operarioId === currentUser._id && f.fecha === isoHoy());
+
+  const cont = document.getElementById('servicios-hoy');
+  if (!cont) return;
+
+  if (serviciosHoy.length === 0) {
+    cont.innerHTML = `<div class="no-servicios"><div class="icon">📅</div><div style="font-size:15px;color:var(--text2)">No tenés servicios asignados para hoy</div><div style="font-size:12px;margin-top:8px">Si creés que hay un error, consultá con tu supervisor</div></div>`;
+    return;
+  }
+
+  cont.innerHTML = serviciosHoy.map(s => {
+    const fichada = fichadasHoy.find(f => f.servicioId === s._id);
+    const tieneEntrada = fichada && fichada.entrada;
+    const tieneSalida = fichada && fichada.salida;
+    const enCurso = tieneEntrada && !tieneSalida;
+
+    let fichadaHtml = '';
+    if (fichada) {
+      const dist = fichada.distanciaEntrada ? `${Math.round(fichada.distanciaEntrada)}m del servicio` : '—';
+      fichadaHtml = `<div class="fichada-info">
+        ${tieneEntrada ? `<div class="fichada-row"><span>Entrada:</span><span class="val">${fichada.entrada}</span></div>` : ''}
+        ${tieneSalida ? `<div class="fichada-row"><span>Salida:</span><span class="val">${fichada.salida}</span></div>` : ''}
+        ${tieneSalida ? `<div class="fichada-row"><span>Horas trabajadas:</span><span class="val">${diffHoras(fichada.entrada, fichada.salida).toFixed(1)}hs</span></div>` : ''}
+        <div class="fichada-row"><span>GPS entrada:</span><span class="val ${fichada.gpsOk ? 'gps-ok' : 'gps-warn'}">${fichada.gpsOk ? '✓ OK' : '⚠ Fuera de rango'} ${dist}</span></div>
+      </div>`;
+    }
+
+    let estado = tieneSalida ? `<span class="pill pill-green">✓ Completado</span>` : enCurso ? `<span class="pill pill-yellow">En curso</span>` : `<span class="pill pill-gray">Pendiente</span>`;
+
+    return `<div class="servicio-card ${enCurso ? 'activo' : ''}">
+      <div class="servicio-header">
+        <div>
+          <div class="servicio-cliente">${s.cliente}</div>
+          <div class="servicio-dir">📍 ${s.direccion}</div>
+          <div class="servicio-horario">Horario: <span>${s.horaInicio || '--:--'} – ${s.horaFin || '--:--'}</span> · ${s.horasContratadas || 0}hs contratadas</div>
+        </div>
+        ${estado}
+      </div>
+      ${fichadaHtml}
+      <div class="servicio-actions">
+        <button class="btn-entrar" ${tieneEntrada ? 'disabled' : ''} onclick="ficharEntrada('${s._id}','${s.cliente}')">
+          ${tieneEntrada ? '✓ Entrada marcada' : '▶ ENTRAR'}
+        </button>
+        <button class="btn-salir" ${!tieneEntrada || tieneSalida ? 'disabled' : ''} onclick="ficharSalida('${s._id}','${s.cliente}')">
+          ${tieneSalida ? '✓ Salida marcada' : '■ SALIR'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function ficharEntrada(servicioId, clienteNombre) {
+  const pos = await getGPS();
+  const servicio = await fsGet('horas_servicios', servicioId);
+  let gpsOk = true, distancia = 0, lat = 0, lon = 0;
+
+  if (pos) {
+    lat = pos.coords.latitude;
+    lon = pos.coords.longitude;
+    if (servicio && servicio.lat && servicio.lon) {
+      distancia = distanciaMetros(lat, lon, Number(servicio.lat), Number(servicio.lon));
+      gpsOk = distancia <= (servicio.radioGps || 300);
+    }
+  }
+
+  const id = `${currentUser._id}_${servicioId}_${isoHoy()}`;
+  await fsSave('horas_fichadas', id, {
+    operarioId: currentUser._id,
+    operarioNombre: currentUser.nombre,
+    servicioId,
+    clienteNombre,
+    fecha: isoHoy(),
+    entrada: horaActual(),
+    salida: '',
+    latEntrada: String(lat),
+    lonEntrada: String(lon),
+    gpsOk,
+    distanciaEntrada: distancia,
+    aprobado: false,
+    estado: 'en-curso'
+  });
+
+  toast(gpsOk ? `✓ Entrada registrada — ${clienteNombre}` : `⚠ Entrada marcada fuera de rango GPS`, gpsOk ? 'ok' : 'warn');
+  await cargarServiciosHoy();
+}
+
+async function ficharSalida(servicioId, clienteNombre) {
+  const id = `${currentUser._id}_${servicioId}_${isoHoy()}`;
+  const fichada = await fsGet('horas_fichadas', id);
+  if (!fichada || !fichada.entrada) return toast('No hay entrada registrada', 'error');
+
+  const salida = horaActual();
+  const horas = diffHoras(fichada.entrada, salida);
+
+  await fsSave('horas_fichadas', id, { salida, horasTrabajadas: horas, estado: 'completo' });
+  toast(`✓ Salida registrada — ${horas.toFixed(1)}hs en ${clienteNombre}`, 'ok');
+  await cargarServiciosHoy();
+}
+
+function getGPS() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { timeout: 8000, enableHighAccuracy: true });
+  });
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: MIS HORAS
+// ════════════════════════════════════════════
+async function renderMisHoras() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Mis Horas</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const todasFichadas = await fsList('horas_fichadas');
+  const mesActual = isoHoy().slice(0, 7); // YYYY-MM
+  const fichadasMes = todasFichadas.filter(f => f.operarioId === currentUser._id && f.fecha && f.fecha.startsWith(mesActual));
+
+  // determinar tipo de operario
+  const opData = await fsGet('horas_usuarios', currentUser._id);
+  const tipo = opData?.tipo || 'VARIABLE';
+
+  let totalHoras = 0;
+  if (tipo === 'FIJO' && opData?.horasSemana) {
+    totalHoras = Number(opData.horasSemana) * 4;
+  } else {
+    totalHoras = fichadasMes.reduce((sum, f) => sum + (f.horasTrabajadas || 0), 0);
+  }
+
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const [y, m] = mesActual.split('-');
+  const nomMes = `${meses[parseInt(m)-1]} ${y}`;
+
+  c.innerHTML = `
+    <div class="section-title">Mis Horas</div>
+    <div class="section-sub">${nomMes}</div>
+    <div class="resumen-mes">
+      <div class="resumen-num">${totalHoras.toFixed(1)}</div>
+      <div class="resumen-label">Horas del mes</div>
+      <div class="resumen-tipo">${tipo === 'FIJO' ? '📌 Operario fijo · Cálculo automático (hs/sem × 4)' : '📊 Operario variable · Suma de horas reales fichadas'}</div>
+    </div>
+    <div class="card-section">
+      <div class="card-section-title">Detalle de fichadas</div>
+      ${fichadasMes.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin fichadas este mes</div>' :
+        fichadasMes.sort((a,b) => b.fecha.localeCompare(a.fecha)).map(f => `
+          <div class="list-item">
+            <div class="list-item-info">
+              <div class="list-item-name">${f.clienteNombre || '—'}</div>
+              <div class="list-item-sub">${f.fecha} · ${f.entrada || '?'} → ${f.salida || 'En curso'} · ${f.horasTrabajadas ? f.horasTrabajadas.toFixed(1)+'hs' : '—'}</div>
+            </div>
+            <span class="pill ${f.gpsOk ? 'pill-green' : 'pill-yellow'}">${f.gpsOk ? 'GPS ✓' : 'GPS ⚠'}</span>
+          </div>`).join('')
+      }
+    </div>`;
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: DASHBOARD (ADMIN)
+// ════════════════════════════════════════════
+async function renderDashboard() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Dashboard</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const [operarios, servicios, fichadas] = await Promise.all([
+    fsList('horas_usuarios'),
+    fsList('horas_servicios'),
+    fsList('horas_fichadas')
+  ]);
+
+  const fichadasHoy = fichadas.filter(f => f.fecha === isoHoy());
+  const fichadasMes = fichadas.filter(f => f.fecha && f.fecha.startsWith(isoHoy().slice(0,7)));
+  const sinGps = fichadasMes.filter(f => !f.gpsOk).length;
+
+  c.innerHTML = `
+    <div class="section-title">Dashboard</div>
+    <div class="section-sub">Resumen operativo</div>
+    <div class="admin-grid">
+      <div class="stat-card"><div class="stat-num">${operarios.filter(o=>o.rol==='OPERARIO').length}</div><div class="stat-label">Operarios</div></div>
+      <div class="stat-card"><div class="stat-num">${servicios.length}</div><div class="stat-label">Servicios</div></div>
+      <div class="stat-card"><div class="stat-num">${fichadasHoy.length}</div><div class="stat-label">Fichadas hoy</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${sinGps>0?'var(--yellow)':'var(--green)'}">${sinGps}</div><div class="stat-label">⚠ GPS fuera rango</div></div>
+    </div>
+    <div class="card-section">
+      <div class="card-section-title">Fichadas de hoy</div>
+      ${fichadasHoy.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin fichadas hoy</div>' :
+        fichadasHoy.sort((a,b)=> (b.entrada||'').localeCompare(a.entrada||'')).map(f => `
+          <div class="list-item">
+            <div class="list-item-info">
+              <div class="list-item-name">${f.operarioNombre || '—'}</div>
+              <div class="list-item-sub">${f.clienteNombre || '—'} · ${f.entrada || '?'} → ${f.salida || 'En curso'}</div>
+            </div>
+            <span class="pill ${f.gpsOk ? 'pill-green' : 'pill-yellow'}">${f.gpsOk ? 'GPS ✓' : 'GPS ⚠'}</span>
+          </div>`).join('')
+      }
+    </div>`;
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: OPERARIOS (ADMIN)
+// ════════════════════════════════════════════
+let diasSelOp = [];
+async function renderOperarios() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Operarios</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+  const operarios = await fsList('horas_usuarios');
+
+  c.innerHTML = `
+    <div class="section-title">Operarios</div>
+    <div class="section-sub">Gestión de usuarios</div>
+    <button class="btn-primary" style="margin-bottom:16px" onclick="modalNuevoOperario()">+ NUEVO OPERARIO</button>
+    <div class="card-section">
+      <div class="card-section-title">Lista (${operarios.length})</div>
+      ${operarios.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin operarios cargados</div>' :
+        operarios.map(o => `
+          <div class="list-item">
+            <div class="list-item-info">
+              <div class="list-item-name">${o.nombre}</div>
+              <div class="list-item-sub">DNI: ${o.dni} · ${o.rol} · ${o.tipo === 'FIJO' ? `Fijo ${o.horasSemana}hs/sem` : 'Variable'}</div>
+            </div>
+            <div class="list-item-actions">
+              <button class="btn-icon" title="Eliminar" onclick="eliminarOperario('${o._id}','${o.nombre}')">🗑</button>
+            </div>
+          </div>`).join('')
+      }
+    </div>`;
+}
+
+function modalNuevoOperario() {
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">Nuevo Operario</div>
+        <div class="form-row">
+          <div class="field-sm"><label>Nombre completo</label><input id="op-nombre" placeholder="Ej: Juan Pérez"></div>
+          <div class="field-sm"><label>DNI</label><input id="op-dni" type="number" inputmode="numeric" placeholder="30123456"></div>
+        </div>
+        <div class="form-row">
+          <div class="field-sm"><label>Contraseña</label><input id="op-pass" type="password" placeholder="••••••••"></div>
+          <div class="field-sm"><label>Rol</label>
+            <select id="op-rol">
+              <option value="OPERARIO">Operario</option>
+              <option value="SUPERVISOR">Supervisor</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field-sm"><label>Tipo</label>
+            <select id="op-tipo" onchange="toggleHorasFijas()">
+              <option value="VARIABLE">Variable (horas reales)</option>
+              <option value="FIJO">Fijo (× 4 semanas)</option>
+            </select>
+          </div>
+          <div class="field-sm" id="campo-hs-sem" style="display:none">
+            <label>Horas por semana</label><input id="op-hs" type="number" placeholder="Ej: 24">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarOperario()">GUARDAR</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleHorasFijas() {
+  const tipo = document.getElementById('op-tipo').value;
+  document.getElementById('campo-hs-sem').style.display = tipo === 'FIJO' ? 'block' : 'none';
+}
+
+async function guardarOperario() {
+  const nombre = document.getElementById('op-nombre').value.trim();
+  const dni = document.getElementById('op-dni').value.trim();
+  const pass = document.getElementById('op-pass').value.trim();
+  const rol = document.getElementById('op-rol').value;
+  const tipo = document.getElementById('op-tipo').value;
+  const hs = document.getElementById('op-hs')?.value || '0';
+  if (!nombre || !dni || !pass) return toast('Completá todos los campos', 'warn');
+
+  const id = await fsAdd('horas_usuarios', { nombre, dni, password: pass, rol, tipo, horasSemana: Number(hs), activo: true });
+  cerrarModal();
+  toast(`✓ ${nombre} creado`, 'ok');
+  renderOperarios();
+}
+
+async function eliminarOperario(id, nombre) {
+  if (!confirm(`¿Eliminar a ${nombre}?`)) return;
+  await fsDelete('horas_usuarios', id);
+  toast(`${nombre} eliminado`, 'ok');
+  renderOperarios();
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: SERVICIOS (ADMIN)
+// ════════════════════════════════════════════
+let diasSelServ = [];
+async function renderServicios() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Servicios</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+  const [servicios, operarios] = await Promise.all([fsList('horas_servicios'), fsList('horas_usuarios')]);
+
+  c.innerHTML = `
+    <div class="section-title">Servicios</div>
+    <div class="section-sub">Clientes y asignaciones</div>
+    <button class="btn-primary" style="margin-bottom:16px" onclick="modalNuevoServicio()">+ NUEVO SERVICIO</button>
+    <div class="card-section">
+      <div class="card-section-title">Servicios (${servicios.length})</div>
+      ${servicios.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin servicios cargados</div>' :
+        servicios.map(s => {
+          const ops = (s.operarios ? (Array.isArray(s.operarios) ? s.operarios : [s.operarios]) : [])
+            .map(id => operarios.find(o => o._id === id)?.nombre || id).join(', ');
+          return `<div class="list-item">
+            <div class="list-item-info">
+              <div class="list-item-name">${s.cliente}</div>
+              <div class="list-item-sub">📍 ${s.direccion} · ${(s.dias||[]).join('-')} · ${s.horaInicio}–${s.horaFin} · ${s.horasContratadas}hs</div>
+              <div class="list-item-sub" style="color:var(--accent)">👷 ${ops || 'Sin asignar'}</div>
+            </div>
+            <div class="list-item-actions">
+              <button class="btn-icon edit" title="Asignar operarios" onclick="modalAsignarOperarios('${s._id}','${s.cliente}')">👷</button>
+              <button class="btn-icon" title="Eliminar" onclick="eliminarServicio('${s._id}','${s.cliente}')">🗑</button>
+            </div>
+          </div>`;
+        }).join('')
+      }
+    </div>`;
+}
+
+async function modalNuevoServicio() {
+  diasSelServ = [];
+  const operarios = await fsList('horas_usuarios');
+  const opsOpts = operarios.filter(o => o.rol === 'OPERARIO').map(o => `<option value="${o._id}">${o.nombre} (DNI: ${o.dni})</option>`).join('');
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">Nuevo Servicio</div>
+        <div class="field-sm"><label>Cliente / Consorcio</label><input id="sv-cliente" placeholder="Ej: Edificio Los Arcos"></div>
+        <div class="field-sm"><label>Dirección</label><input id="sv-dir" placeholder="Ej: Av. Colón 1234, Córdoba"></div>
+        <div class="form-row">
+          <div class="field-sm"><label>Hora inicio</label><input id="sv-inicio" type="time"></div>
+          <div class="field-sm"><label>Hora fin</label><input id="sv-fin" type="time"></div>
+        </div>
+        <div class="field-sm"><label>Horas contratadas</label><input id="sv-hs" type="number" step="0.5" placeholder="Ej: 2"></div>
+        <div class="field-sm">
+          <label>Días de trabajo</label>
+          <div class="dias-check" id="dias-check">
+            ${DIAS_SEMANA.map((d,i) => `<button class="dia-btn" id="dia-${d}" onclick="toggleDia('${d}')">${d}</button>`).join('')}
+          </div>
+        </div>
+        <div class="field-sm"><label>Asignar operarios</label>
+          <select id="sv-ops" multiple style="height:90px">${opsOpts}</select>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">Mantené Ctrl/Cmd para seleccionar varios</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarServicio()">GUARDAR</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleDia(dia) {
+  const btn = document.getElementById('dia-' + dia);
+  if (diasSelServ.includes(dia)) {
+    diasSelServ = diasSelServ.filter(d => d !== dia);
+    btn.classList.remove('sel');
+  } else {
+    diasSelServ.push(dia);
+    btn.classList.add('sel');
+  }
+}
+
+async function guardarServicio() {
+  const cliente = document.getElementById('sv-cliente').value.trim();
+  const direccion = document.getElementById('sv-dir').value.trim();
+  const horaInicio = document.getElementById('sv-inicio').value;
+  const horaFin = document.getElementById('sv-fin').value;
+  const horasContratadas = Number(document.getElementById('sv-hs').value);
+  const opsSelect = document.getElementById('sv-ops');
+  const operarios = Array.from(opsSelect.selectedOptions).map(o => o.value);
+
+  if (!cliente || !direccion || diasSelServ.length === 0) return toast('Completá cliente, dirección y días', 'warn');
+
+  await fsAdd('horas_servicios', {
+    cliente, direccion, horaInicio, horaFin, horasContratadas,
+    dias: diasSelServ, operarios, radioGps: 300, lat: '', lon: ''
+  });
+  cerrarModal();
+  toast(`✓ Servicio ${cliente} creado`, 'ok');
+  renderServicios();
+}
+
+async function modalAsignarOperarios(servicioId, clienteNombre) {
+  const [servicio, operarios] = await Promise.all([fsGet('horas_servicios', servicioId), fsList('horas_usuarios')]);
+  const asignados = servicio?.operarios || [];
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">Asignar Operarios</div>
+        <div class="section-sub" style="margin-bottom:14px">${clienteNombre}</div>
+        ${operarios.filter(o=>o.rol==='OPERARIO').map(o => `
+          <div class="list-item" style="padding:8px 0">
+            <div class="list-item-info"><div class="list-item-name">${o.nombre}</div><div class="list-item-sub">DNI: ${o.dni}</div></div>
+            <input type="checkbox" id="chk-${o._id}" ${asignados.includes(o._id)?'checked':''} style="width:20px;height:20px;accent-color:var(--accent)">
+          </div>`).join('')}
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarAsignacion('${servicioId}')">GUARDAR</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function guardarAsignacion(servicioId) {
+  const checkboxes = document.querySelectorAll('[id^="chk-"]');
+  const seleccionados = Array.from(checkboxes).filter(c => c.checked).map(c => c.id.replace('chk-', ''));
+  await fsSave('horas_servicios', servicioId, { operarios: seleccionados });
+  cerrarModal();
+  toast('✓ Asignación guardada', 'ok');
+  renderServicios();
+}
+
+async function eliminarServicio(id, nombre) {
+  if (!confirm(`¿Eliminar servicio ${nombre}?`)) return;
+  await fsDelete('horas_servicios', id);
+  toast(`${nombre} eliminado`, 'ok');
+  renderServicios();
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: FICHADAS ADMIN
+// ════════════════════════════════════════════
+async function renderFichadasAdmin() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Fichadas</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+  const fichadas = await fsList('horas_fichadas');
+  const mesActual = isoHoy().slice(0,7);
+  const fichadasMes = fichadas.filter(f => f.fecha && f.fecha.startsWith(mesActual));
+
+  c.innerHTML = `
+    <div class="section-title">Fichadas</div>
+    <div class="section-sub">${fichadasMes.length} registros este mes · <button class="btn-secondary" style="padding:6px 14px;font-size:13px" onclick="exportarExcel()">⬇ EXPORTAR EXCEL</button></div>
+    <div class="card-section">
+      ${fichadasMes.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin fichadas este mes</div>' :
+        fichadasMes.sort((a,b)=>b.fecha.localeCompare(a.fecha)||b.entrada?.localeCompare(a.entrada||'')).map(f => `
+          <div class="list-item">
+            <div class="list-item-info">
+              <div class="list-item-name">${f.operarioNombre || '—'} → ${f.clienteNombre || '—'}</div>
+              <div class="list-item-sub">${f.fecha} · Entrada: ${f.entrada||'?'} · Salida: ${f.salida||'pendiente'} · ${f.horasTrabajadas ? f.horasTrabajadas.toFixed(1)+'hs' : '—'}</div>
+            </div>
+            <span class="pill ${f.gpsOk ? 'pill-green' : 'pill-yellow'}" style="margin-left:8px">${f.gpsOk ? 'GPS✓' : 'GPS⚠'}</span>
+          </div>`).join('')
+      }
+    </div>`;
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: SUPERVISOR
+// ════════════════════════════════════════════
+async function renderSupervisor() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Control</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+  const fichadas = await fsList('horas_fichadas');
+  const fichadasHoy = fichadas.filter(f => f.fecha === isoHoy());
+
+  c.innerHTML = `
+    <div class="section-title">Control</div>
+    <div class="section-sub">Fichadas de hoy — ${fichadasHoy.length} registros</div>
+    ${fichadasHoy.length === 0 ? '<div class="no-servicios"><div class="icon">📋</div><div>Sin fichadas hoy</div></div>' :
+      fichadasHoy.map(f => `
+        <div class="fichada-supervisor">
+          <div class="fs-header">
+            <div class="fs-operario">${f.operarioNombre || '—'}</div>
+            <span class="pill ${f.gpsOk ? 'pill-green' : 'pill-yellow'}">${f.gpsOk ? 'GPS ✓' : 'GPS ⚠'}</span>
+          </div>
+          <div class="fs-detalle">
+            <span>🏢 ${f.clienteNombre || '—'}</span>
+            <span>⏱ ${f.entrada||'?'} → ${f.salida||'En curso'} ${f.horasTrabajadas ? '· '+f.horasTrabajadas.toFixed(1)+'hs' : ''}</span>
+            ${!f.gpsOk ? `<span style="color:var(--yellow)">⚠ A ${Math.round(f.distanciaEntrada||0)}m del servicio</span>` : ''}
+          </div>
+          ${!f.aprobado && f.salida ? `<div class="fs-actions">
+            <button class="btn-secondary" style="flex:1" onclick="aprobarFichada('${f._id}')">✓ APROBAR</button>
+            <button class="btn-danger" style="flex:1" onclick="observarFichada('${f._id}')">⚠ OBSERVAR</button>
+          </div>` : f.aprobado ? '<div style="margin-top:8px"><span class="pill pill-green">✓ Aprobado</span></div>' : ''}
+        </div>`).join('')
+    }`;
+}
+
+async function aprobarFichada(id) {
+  await fsSave('horas_fichadas', id, { aprobado: true, estado: 'aprobado' });
+  toast('✓ Fichada aprobada', 'ok');
+  renderSupervisor();
+}
+
+async function observarFichada(id) {
+  const obs = prompt('Ingresá la observación:');
+  if (!obs) return;
+  await fsSave('horas_fichadas', id, { aprobado: false, estado: 'observado', observacion: obs });
+  toast('Fichada observada', 'warn');
+  renderSupervisor();
+}
+
+// ════════════════════════════════════════════
+//  EXPORT EXCEL
+// ════════════════════════════════════════════
+async function exportarExcel() {
+  toast('Generando Excel...', 'info');
+  const [fichadas, operarios, servicios] = await Promise.all([
+    fsList('horas_fichadas'), fsList('horas_usuarios'), fsList('horas_servicios')
+  ]);
+
+  const mesActual = isoHoy().slice(0,7);
+  const fichadasMes = fichadas.filter(f => f.fecha && f.fecha.startsWith(mesActual));
+
+  // Agrupar por operario
+  const porOperario = {};
+  for (const f of fichadasMes) {
+    if (!porOperario[f.operarioId]) porOperario[f.operarioId] = [];
+    porOperario[f.operarioId].push(f);
+  }
+
+  let csv = 'Operario;DNI;Tipo;Fecha;Cliente;Entrada;Salida;Hs.Reales;Hs.Contratadas;GPS OK;Estado;Observacion\n';
+
+  for (const [opId, fics] of Object.entries(porOperario)) {
+    const op = operarios.find(o => o._id === opId);
+    for (const f of fics.sort((a,b) => a.fecha.localeCompare(b.fecha))) {
+      const srv = servicios.find(s => s._id === f.servicioId);
+      csv += [
+        f.operarioNombre || '',
+        op?.dni || '',
+        op?.tipo || 'VARIABLE',
+        f.fecha,
+        f.clienteNombre || '',
+        f.entrada || '',
+        f.salida || '',
+        f.horasTrabajadas ? f.horasTrabajadas.toFixed(1) : '',
+        srv?.horasContratadas || '',
+        f.gpsOk ? 'SI' : 'NO',
+        f.estado || '',
+        f.observacion || ''
+      ].join(';') + '\n';
+    }
+  }
+
+  // Totales por operario
+  csv += '\n;TOTALES POR OPERARIO;;\n';
+  csv += 'Operario;Tipo;Hs.Mes;Metodo\n';
+  for (const [opId, fics] of Object.entries(porOperario)) {
+    const op = operarios.find(o => o._id === opId);
+    let total;
+    if (op?.tipo === 'FIJO') {
+      total = (op.horasSemana || 0) * 4;
+    } else {
+      total = fics.reduce((s, f) => s + (f.horasTrabajadas || 0), 0);
+    }
+    csv += `${op?.nombre || opId};${op?.tipo || 'VARIABLE'};${total.toFixed(1)};${op?.tipo === 'FIJO' ? 'hs/sem × 4' : 'Suma real fichadas'}\n`;
+  }
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `MegaClean_Horas_${mesActual}.csv`;
+  a.click();
+  toast('✓ Excel exportado', 'ok');
+}
+
+// ════════════════════════════════════════════
+//  MODAL UTILS
+// ════════════════════════════════════════════
+function cerrarModal() {
+  document.getElementById('modal-container').innerHTML = '';
+}
+
+// ════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    document.getElementById('loader').style.display = 'none';
+    document.getElementById('screen-login').classList.remove('hidden');
+    // Enter key en login
+    document.getElementById('login-pass').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+  }, 1200);
+});
+</script>
+</body>
+</html>
