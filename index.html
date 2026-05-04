@@ -336,12 +336,18 @@ async function doLogin() {
   if (!dni || !pass) return toast('Ingresá DNI y contraseña', 'warn');
 
   // Admin hardcoded
-  if (dni === 'ADMIN' || dni === '0') {
-    if (pass === 'mega2024') {
-      currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni: 'ADMIN' };
+  if (dni === 'admin' || dni === 'ADMIN') {
+    if (pass === 'admin1234') {
+      currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni: 'admin' };
       iniciarApp();
       return;
     }
+  }
+  // Roberto hardcoded
+  if (dni === '25365716' && pass === '1945') {
+    currentUser = { _id: 'roberto', nombre: 'Roberto', rol: 'ADMIN', dni: '25365716' };
+    iniciarApp();
+    return;
   }
 
   showLoader(true);
