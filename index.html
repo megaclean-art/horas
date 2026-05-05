@@ -552,12 +552,14 @@ const TABS = {
     { id: 'servicios', icon: '🏢', label: 'Servicios' },
     { id: 'coberturas', icon: '🔄', label: 'Coberturas' },
     { id: 'feriados', icon: '📅', label: 'Feriados' },
+    { id: 'reportes', icon: '📈', label: 'Reportes' },
     { id: 'fichadas', icon: '📋', label: 'Fichadas' },
   ],
   SUPERVISOR: [
     { id: 'supervisor', icon: '🔍', label: 'Control' },
     { id: 'coberturas', icon: '🔄', label: 'Coberturas' },
     { id: 'feriados', icon: '📅', label: 'Feriados' },
+    { id: 'reportes', icon: '📈', label: 'Reportes' },
     { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
   ],
   OPERARIO: [
@@ -582,7 +584,7 @@ function navigateTo(id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   const tab = document.getElementById('tab-' + id);
   if (tab) tab.classList.add('active');
-  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, coberturas: renderCoberturas, feriados: renderFeriados };
+  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, coberturas: renderCoberturas, feriados: renderFeriados, reportes: renderReportes };
   if (screens[id]) screens[id]();
 }
 
@@ -2164,6 +2166,446 @@ async function exportarFeriadosMes() {
   link.click(); toast('✓ Reporte mensual exportado', 'ok');
 }
 
+
+// ════════════════════════════════════════════
+//  MÓDULO: REPORTES
+// ════════════════════════════════════════════
+
+// ── Pantalla principal con 4 sub-reportes ──
+async function renderReportes() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `
+    <div class="section-title">Reportes</div>
+    <div class="section-sub">Análisis de horas y asignaciones</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">
+      <div class="stat-card" style="cursor:pointer;transition:all .2s;border-color:var(--accent)" onclick="renderReporteBancoHoras()">
+        <div style="font-size:28px;margin-bottom:6px">⚖️</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--accent)">Banco de Horas</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Horas recibo vs trabajadas · Quién nos debe / debemos</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;transition:all .2s" onclick="renderReporteOperario()">
+        <div style="font-size:28px;margin-bottom:6px">👷</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text)">Por Operario</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Servicios asignados · Horas · Legajo</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="stat-card" style="cursor:pointer;transition:all .2s" onclick="renderReporteServicios()">
+        <div style="font-size:28px;margin-bottom:6px">🏢</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text)">Por Servicio</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Operarios asignados · Horas por objetivo</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;transition:all .2s" onclick="renderReporteMensual()">
+        <div style="font-size:28px;margin-bottom:6px">📅</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text)">Cierre Mensual</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Resumen completo exportable a Excel</div>
+      </div>
+    </div>`;
+}
+
+// ── REPORTE 1: BANCO DE HORAS ──
+async function renderReporteBancoHoras() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Banco de Horas</div><div style="text-align:center;padding:30px;color:var(--text3)">Calculando...</div>`;
+
+  const [operarios, fichadas, servicios] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_fichadas'), fsList('horas_servicios')
+  ]);
+
+  const mesActual = isoHoy().slice(0, 7);
+  const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mesActual));
+
+  // Calcular horas trabajadas este mes por operario
+  const horasTrabajadas = {};
+  for (const f of fichadasMes) {
+    if (!f.operarioId || !f.horasTrabajadas) continue;
+    horasTrabajadas[f.operarioId] = (horasTrabajadas[f.operarioId] || 0) + f.horasTrabajadas;
+  }
+
+  // Para operarios FIJO sin fichadas aún, calcular por servicios asignados
+  const horasFijasMes = {};
+  for (const s of servicios) {
+    const ops = Array.isArray(s.operarios) ? s.operarios : [];
+    for (const opId of ops) {
+      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + (s.horasContratadas || 0) * (s.dias?.length || 0);
+    }
+  }
+
+  // Armar tabla de operarios
+  const ops = operarios.filter(o => o.rol === 'OPERARIO' && o.horasRecibo);
+  const rows = ops.map(o => {
+    const recibo = Number(o.horasRecibo) || 0;
+    let trabajadas = 0;
+    if (o.tipo === 'FIJO') {
+      // Fijo: usar horas semanales × 4 o servicios asignados
+      trabajadas = o.horasSemana ? Number(o.horasSemana) * 4 : (horasTrabajadas[o._id] || 0);
+    } else {
+      trabajadas = horasTrabajadas[o._id] || 0;
+    }
+    const diff = trabajadas - recibo;
+    return { op: o, recibo, trabajadas, diff };
+  }).sort((a, b) => a.diff - b.diff); // Los que más nos deben primero (diff más negativo)
+
+  const nosDebenCount = rows.filter(r => r.diff < 0).length;
+  const debemosCount = rows.filter(r => r.diff > 0).length;
+  const equilibrio = rows.filter(r => r.diff === 0).length;
+
+  const [y, m] = mesActual.split('-');
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+    <div class="section-title">⚖️ Banco de Horas</div>
+    <div class="section-sub">${meses[parseInt(m)-1]} ${y}</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="stat-card" style="border-color:rgba(214,61,74,.3)">
+        <div class="stat-num" style="color:var(--red)">${nosDebenCount}</div>
+        <div class="stat-label">Nos deben horas</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(39,168,90,.3)">
+        <div class="stat-num" style="color:var(--green)">${debemosCount}</div>
+        <div class="stat-label">Les debemos</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">${equilibrio}</div>
+        <div class="stat-label">En equilibrio</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <input id="rp-buscar" placeholder="🔍 Buscar operario..." oninput="filtrarBanco()"
+        style="flex:1;min-width:160px;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+      <select id="rp-filtro" onchange="filtrarBanco()"
+        style="background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos</option>
+        <option value="deben">Nos deben horas</option>
+        <option value="debemos">Les debemos</option>
+        <option value="ok">En equilibrio</option>
+      </select>
+      <button class="btn-secondary" style="padding:9px 14px;font-size:13px" onclick="exportarBancoHoras()">⬇ Excel</button>
+    </div>
+
+    <div id="banco-tabla"></div>`;
+
+  // Guardar rows globalmente para filtrado
+  window._bancoRows = rows;
+  filtrarBanco();
+}
+
+function filtrarBanco() {
+  const q = (document.getElementById('rp-buscar')?.value || '').toLowerCase();
+  const filtro = document.getElementById('rp-filtro')?.value || '';
+  let rows = window._bancoRows || [];
+
+  if (q) rows = rows.filter(r => (r.op.nombre||'').toLowerCase().includes(q));
+  if (filtro === 'deben') rows = rows.filter(r => r.diff < 0);
+  else if (filtro === 'debemos') rows = rows.filter(r => r.diff > 0);
+  else if (filtro === 'ok') rows = rows.filter(r => r.diff === 0);
+
+  const cont = document.getElementById('banco-tabla');
+  if (!cont) return;
+
+  if (!rows.length) {
+    cont.innerHTML = `<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`;
+    return;
+  }
+
+  cont.innerHTML = `<div class="card-section" style="padding:0;overflow:hidden">
+    <div style="padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase">
+      <div>Operario</div><div style="text-align:center">Recibo</div><div style="text-align:center">Trabajadas</div><div style="text-align:center">Diferencia</div>
+    </div>
+    ${rows.map((r, i) => {
+      const diffColor = r.diff < 0 ? 'var(--red)' : r.diff > 0 ? 'var(--green)' : 'var(--text3)';
+      const diffLabel = r.diff < 0 ? `${r.diff.toFixed(1)}hs` : r.diff > 0 ? `+${r.diff.toFixed(1)}hs` : '—';
+      const bg = i % 2 === 0 ? '' : 'background:var(--surface2)';
+      return `<div style="padding:11px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;align-items:center;${bg}">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${r.op.nombre}</div>
+          <div style="font-size:11px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · ${r.op.tipo||'FIJO'}</div>
+        </div>
+        <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.recibo}</div>
+        <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.trabajadas.toFixed(1)}</div>
+        <div style="text-align:center;font-size:15px;font-weight:900;color:${diffColor}">${diffLabel}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function exportarBancoHoras() {
+  const rows = window._bancoRows || [];
+  const mes = isoHoy().slice(0, 7);
+  let csv = `BANCO DE HORAS;${mes}\n\n`;
+  csv += `Legajo;Operario;Tipo;Horas Recibo;Horas Trabajadas;Diferencia;Estado\n`;
+  for (const r of rows) {
+    const estado = r.diff < 0 ? 'Nos deben' : r.diff > 0 ? 'Les debemos' : 'Equilibrio';
+    csv += [r.op.legajo||'', r.op.nombre, r.op.tipo||'FIJO', r.recibo, r.trabajadas.toFixed(1), r.diff.toFixed(1), estado].join(';') + '\n';
+  }
+  const nosDebenTotal = rows.filter(r=>r.diff<0).reduce((s,r)=>s+Math.abs(r.diff),0);
+  const debemosTotal = rows.filter(r=>r.diff>0).reduce((s,r)=>s+r.diff,0);
+  csv += `\n;TOTALES;;;;\n`;
+  csv += `;Horas que nos deben:;${nosDebenTotal.toFixed(1)}\n`;
+  csv += `;Horas que debemos:;${debemosTotal.toFixed(1)}\n`;
+
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `BancoHoras_${mes}.csv`;
+  link.click(); toast('✓ Exportado', 'ok');
+}
+
+// ── REPORTE 2: POR OPERARIO ──
+async function renderReporteOperario() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Por Operario</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const [operarios, servicios, fichadas] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_servicios'), fsList('horas_fichadas')
+  ]);
+  const mes = isoHoy().slice(0,7);
+  const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mes));
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+    <div class="section-title">👷 Por Operario</div>
+    <div class="section-sub">Servicios asignados y horas del mes</div>
+    <input id="rp-op-q" placeholder="🔍 Buscar operario o legajo..." oninput="filtrarRepOp()"
+      style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
+    <div id="rp-op-lista"></div>`;
+
+  window._rpOps = operarios.filter(o => o.rol === 'OPERARIO').map(o => {
+    const srvs = servicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
+    const hsRecibo = Number(o.horasRecibo) || 0;
+    const hsReales = fichadasMes.filter(f=>f.operarioId===o._id).reduce((s,f)=>s+(f.horasTrabajadas||0),0);
+    const hsFijas = o.tipo==='FIJO' && o.horasSemana ? Number(o.horasSemana)*4 : hsReales;
+    return { op: o, srvs, hsRecibo, hsFijas, hsReales };
+  }).sort((a,b)=>a.op.nombre.localeCompare(b.op.nombre));
+
+  filtrarRepOp();
+}
+
+function filtrarRepOp() {
+  const q = (document.getElementById('rp-op-q')?.value||'').toLowerCase();
+  const lista = q ? (window._rpOps||[]).filter(r=>(r.op.nombre||'').toLowerCase().includes(q)||(r.op.legajo||'').includes(q)) : window._rpOps||[];
+  const cont = document.getElementById('rp-op-lista');
+  if (!cont) return;
+  if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`; return; }
+
+  cont.innerHTML = lista.map(r => `
+    <div class="card-section" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="font-family:var(--font-display);font-size:18px;font-weight:700">${r.op.nombre}</div>
+          <div style="font-size:12px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · ${r.op.tipo||'FIJO'} · ${r.op.supervisor||''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--text3)">Recibo</div>
+          <div style="font-family:var(--font-display);font-size:20px;font-weight:900;color:var(--accent)">${r.hsRecibo}hs</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Hs Fijas</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${r.hsFijas.toFixed(0)}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Hs Fichadas</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${r.hsReales.toFixed(1)}</div>
+        </div>
+        <div style="background:${(r.hsFijas-r.hsRecibo)<0?'var(--red-light)':r.hsFijas>r.hsRecibo?'var(--green-light)':'var(--surface2)'};border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Diferencia</div>
+          <div style="font-size:18px;font-weight:700;color:${(r.hsFijas-r.hsRecibo)<0?'var(--red)':r.hsFijas>r.hsRecibo?'var(--green)':'var(--text3)'}">${(r.hsFijas-r.hsRecibo)>=0?'+':''}${(r.hsFijas-r.hsRecibo).toFixed(0)}</div>
+        </div>
+      </div>
+      ${r.srvs.length > 0 ? `
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Servicios asignados (${r.srvs.length})</div>
+      ${r.srvs.map(s=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border)">🏢 ${s.cliente} · ${(s.dias||[]).join('-')} · ${s.horaInicio||''}–${s.horaFin||''} · ${s.horasContratadas||0}hs</div>`).join('')}
+      ` : `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicios asignados</div>`}
+    </div>`).join('');
+}
+
+// ── REPORTE 3: POR SERVICIO ──
+async function renderReporteServicios() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Por Servicio</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const [servicios, operarios] = await Promise.all([fsList('horas_servicios'), fsList('horas_usuarios')]);
+
+  const supervisores = [...new Set(servicios.map(s=>s.supervisor||s.idSupervisor).filter(Boolean))].sort();
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+    <div class="section-title">🏢 Por Servicio</div>
+    <div class="section-sub">${servicios.length} objetivos activos</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <input id="rp-srv-q" placeholder="🔍 Buscar servicio..." oninput="filtrarRepSrv()"
+        style="flex:1;min-width:160px;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+      <select id="rp-srv-sup" onchange="filtrarRepSrv()"
+        style="background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos los supervisores</option>
+        ${supervisores.map(s=>`<option value="${s}">${s}</option>`).join('')}
+      </select>
+      <button class="btn-secondary" style="padding:9px 14px;font-size:13px" onclick="exportarReporteServicios()">⬇ Excel</button>
+    </div>
+    <div id="rp-srv-lista"></div>`;
+
+  window._rpSrvs = servicios.map(s => {
+    const ops = (Array.isArray(s.operarios)?s.operarios:[]).map(id=>operarios.find(o=>o._id===id)).filter(Boolean);
+    const hsTotalesMes = (s.horasContratadas||0) * (s.dias?.length||0) * 4;
+    return { s, ops, hsTotalesMes };
+  }).sort((a,b)=>(a.s.cliente||'').localeCompare(b.s.cliente||''));
+
+  filtrarRepSrv();
+}
+
+function filtrarRepSrv() {
+  const q = (document.getElementById('rp-srv-q')?.value||'').toLowerCase();
+  const sup = document.getElementById('rp-srv-sup')?.value||'';
+  let lista = window._rpSrvs||[];
+  if (q) lista = lista.filter(r=>(r.s.cliente||'').toLowerCase().includes(q)||(r.s.codigo||'').includes(q)||(r.s.direccion||'').toLowerCase().includes(q));
+  if (sup) lista = lista.filter(r=>(r.s.supervisor||r.s.idSupervisor||'')===sup);
+
+  const cont = document.getElementById('rp-srv-lista');
+  if (!cont) return;
+  if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`; return; }
+
+  cont.innerHTML = `<div class="card-section" style="padding:0;overflow:hidden">
+    ${lista.map((r,i)=>`
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);${i%2===1?'background:var(--surface2)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:14px;color:var(--text)">${r.s.cliente||'—'} <span style="font-size:11px;color:var(--text3);font-weight:400">#${r.s.codigo||'—'}</span></div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">📍 ${r.s.direccion||'Sin dirección'}</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:2px">${(r.s.dias||[]).join(' · ')} · ${r.s.horaInicio||''}–${r.s.horaFin||''} · ${r.s.horasContratadas||0}hs/día</div>
+            <div style="font-size:12px;color:var(--accent);margin-top:3px">👷 ${r.ops.map(o=>o.nombre).join(', ')||'Sin asignar'}</div>
+          </div>
+          <div style="text-align:right;margin-left:12px;flex-shrink:0">
+            <div style="font-size:10px;color:var(--text3)">Hs/mes</div>
+            <div style="font-family:var(--font-display);font-size:20px;font-weight:900;color:var(--accent)">${r.hsTotalesMes.toFixed(0)}</div>
+          </div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+async function exportarReporteServicios() {
+  const lista = window._rpSrvs||[];
+  const mes = isoHoy().slice(0,7);
+  let csv = `REPORTE SERVICIOS;${mes}\n\n`;
+  csv += `Codigo;Cliente;Direccion;Supervisor;Dias;Hora Inicio;Hora Fin;Hs/Dia;Hs Mes Est.;Operarios\n`;
+  for (const r of lista) {
+    csv += [r.s.codigo||'',r.s.cliente||'',r.s.direccion||'',r.s.supervisor||'',
+      (r.s.dias||[]).join('-'),r.s.horaInicio||'',r.s.horaFin||'',
+      r.s.horasContratadas||0, r.hsTotalesMes.toFixed(0),
+      r.ops.map(o=>o.nombre).join(' / ')].join(';') + '\n';
+  }
+  const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `Servicios_${mes}.csv`;
+  link.click(); toast('✓ Exportado', 'ok');
+}
+
+// ── REPORTE 4: CIERRE MENSUAL COMPLETO ──
+async function renderReporteMensual() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Cierre Mensual</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const [operarios, fichadas, servicios] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_fichadas'), fsList('horas_servicios')
+  ]);
+
+  const mes = isoHoy().slice(0,7);
+  const [y,m] = mes.split('-');
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const fichadasMes = fichadas.filter(f=>f.fecha?.startsWith(mes));
+
+  const ops = operarios.filter(o=>o.rol==='OPERARIO');
+  let totalReciboMes = 0, totalTrabajadasMes = 0, totalFeriadosHs = 0;
+
+  const rows = ops.map(o => {
+    const recibo = Number(o.horasRecibo)||0;
+    const srvs = servicios.filter(s=>(Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
+    const fichOp = fichadasMes.filter(f=>f.operarioId===o._id);
+    const hsFichadas = fichOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
+    const hsFeriado = fichOp.filter(f=>f.esFeriado).reduce((s,f)=>s+(f.horasTrabajadas||0),0);
+    const hsMes = o.tipo==='FIJO' ? (o.horasSemana?Number(o.horasSemana)*4:hsFichadas) : hsFichadas;
+    const diff = hsMes - recibo;
+    totalReciboMes += recibo;
+    totalTrabajadasMes += hsMes;
+    totalFeriadosHs += hsFeriado;
+    return { o, recibo, hsMes, diff, hsFeriado, cantSrvs: srvs.length };
+  }).sort((a,b)=>a.diff-b.diff);
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+    <div class="section-title">📅 Cierre Mensual</div>
+    <div class="section-sub">${meses[parseInt(m)-1]} ${y}</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="stat-card">
+        <div class="stat-num" style="font-size:28px">${totalReciboMes.toLocaleString()}</div>
+        <div class="stat-label">Total Hs Recibo</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="font-size:28px">${totalTrabajadasMes.toFixed(0)}</div>
+        <div class="stat-label">Total Hs Trabajadas</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="font-size:28px;color:${totalTrabajadasMes-totalReciboMes>=0?'var(--green)':'var(--red)'}">${totalTrabajadasMes-totalReciboMes>=0?'+':''}${(totalTrabajadasMes-totalReciboMes).toFixed(0)}</div>
+        <div class="stat-label">Balance Total</div>
+      </div>
+    </div>
+
+    <button class="btn-primary" style="margin-bottom:14px" onclick="exportarCierreMensual()">⬇ EXPORTAR EXCEL COMPLETO</button>
+
+    <div class="card-section" style="padding:0;overflow:hidden">
+      <div style="padding:11px 16px;background:var(--surface2);border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:6px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase">
+        <div>Operario</div><div style="text-align:center">Recibo</div><div style="text-align:center">Trabajadas</div><div style="text-align:center">Diferencia</div><div style="text-align:center">Servicios</div>
+      </div>
+      ${rows.map((r,i)=>`
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:6px;align-items:center;${i%2===1?'background:var(--surface2)':''}">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${r.o.nombre}</div>
+            <div style="font-size:10px;color:var(--text3)">Leg.${r.o.legajo||'—'} · ${r.o.tipo||'FIJO'}</div>
+          </div>
+          <div style="text-align:center;font-size:13px;font-weight:700;color:var(--text2)">${r.recibo}</div>
+          <div style="text-align:center;font-size:13px;font-weight:700;color:var(--text2)">${r.hsMes.toFixed(0)}</div>
+          <div style="text-align:center;font-size:14px;font-weight:900;color:${r.diff<0?'var(--red)':r.diff>0?'var(--green)':'var(--text3)'}">
+            ${r.diff>=0?'+':''}${r.diff.toFixed(0)}
+          </div>
+          <div style="text-align:center;font-size:13px;color:var(--text2)">${r.cantSrvs}</div>
+        </div>`).join('')}
+    </div>`;
+
+  window._cierreMensualRows = rows;
+  window._cierreMes = mes;
+}
+
+async function exportarCierreMensual() {
+  const rows = window._cierreMensualRows||[];
+  const mes = window._cierreMes||isoHoy().slice(0,7);
+  const [y,m] = mes.split('-');
+  const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  let csv = `CIERRE MENSUAL MEGACLEAN;${meses[parseInt(m)-1]} ${y}\n\n`;
+  csv += `Legajo;Operario;Tipo;Supervisor;Horas Recibo;Horas Trabajadas;Diferencia;Cant. Servicios;Estado\n`;
+  for (const r of rows) {
+    const estado = r.diff<0?'Nos deben':r.diff>0?'Les debemos':'Equilibrio';
+    csv += [r.o.legajo||'',r.o.nombre,r.o.tipo||'FIJO',r.o.supervisor||'',
+      r.recibo,r.hsMes.toFixed(1),r.diff.toFixed(1),r.cantSrvs,estado].join(';')+'\n';
+  }
+  const totRec = rows.reduce((s,r)=>s+r.recibo,0);
+  const totTrab = rows.reduce((s,r)=>s+r.hsMes,0);
+  csv += `\n;TOTALES;;; ${totRec};${totTrab.toFixed(1)};${(totTrab-totRec).toFixed(1)};;\n`;
+
+  const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `CierreMensual_MegaClean_${mes}.csv`;
+  link.click(); toast('✓ Cierre mensual exportado', 'ok');
+}
 
 function cerrarModal() {
   document.getElementById('modal-container').innerHTML = '';
