@@ -3,25 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>MegaClean · Control de Horas</title>
+<title>MegaClean · Gestión de Horas</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f1114;
-    --surface: #181c21;
-    --surface2: #1f252c;
-    --border: #2a3240;
-    --accent: #00b4d8;
-    --accent2: #0077b6;
-    --green: #2dc653;
-    --red: #e63946;
-    --yellow: #f4a261;
-    --text: #e8edf2;
-    --text2: #7a8899;
-    --text3: #4a5568;
+    --bg: #f4f7fa;
+    --surface: #ffffff;
+    --surface2: #eef2f7;
+    --border: #dce3ed;
+    --accent: #1a8fcb;
+    --accent2: #0e6fa0;
+    --accent-light: #e8f4fc;
+    --green: #27a85a;
+    --green-light: #eaf7ef;
+    --red: #d63d4a;
+    --red-light: #fdeef0;
+    --yellow: #e07b2a;
+    --yellow-light: #fef3e8;
+    --text: #1a2533;
+    --text2: #4a6278;
+    --text3: #8fa3b8;
+    --shadow: 0 2px 12px rgba(26,143,203,.08);
+    --shadow-md: 0 4px 24px rgba(26,143,203,.12);
     --radius: 10px;
     --font-display: 'Barlow Condensed', sans-serif;
     --font-body: 'Barlow', sans-serif;
+    /* MegaClean brand */
+    --mc-blue: #1a8fcb;
+    --mc-blue-dark: #0e6fa0;
+    --mc-green: #5cb85c;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-body); overflow-x: hidden; }
@@ -29,57 +39,66 @@
   /* ── UTILS ── */
   .hidden { display: none !important; }
   .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
-  .pill-green { background: rgba(45,198,83,.15); color: var(--green); border: 1px solid rgba(45,198,83,.3); }
-  .pill-red { background: rgba(230,57,70,.15); color: var(--red); border: 1px solid rgba(230,57,70,.3); }
-  .pill-yellow { background: rgba(244,162,97,.15); color: var(--yellow); border: 1px solid rgba(244,162,97,.3); }
-  .pill-blue { background: rgba(0,180,216,.15); color: var(--accent); border: 1px solid rgba(0,180,216,.3); }
-  .pill-gray { background: rgba(122,136,153,.1); color: var(--text2); border: 1px solid var(--border); }
+  .pill-green { background: var(--green-light); color: var(--green); border: 1px solid rgba(39,168,90,.25); }
+  .pill-red { background: var(--red-light); color: var(--red); border: 1px solid rgba(214,61,74,.25); }
+  .pill-yellow { background: var(--yellow-light); color: var(--yellow); border: 1px solid rgba(224,123,42,.25); }
+  .pill-blue { background: var(--accent-light); color: var(--accent); border: 1px solid rgba(26,143,203,.25); }
+  .pill-gray { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
 
   /* ── TOAST ── */
-  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 12px 20px; border-radius: var(--radius); font-size: 13px; z-index: 9999; transition: transform .3s ease; white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--text); border: none; color: #fff; padding: 12px 20px; border-radius: var(--radius); font-size: 13px; z-index: 9999; transition: transform .3s ease; white-space: nowrap; box-shadow: var(--shadow-md); }
   #toast.show { transform: translateX(-50%) translateY(0); }
 
   /* ── LOADER ── */
-  #loader { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 9000; flex-direction: column; gap: 16px; }
-  .loader-logo { font-family: var(--font-display); font-size: 28px; font-weight: 900; letter-spacing: 3px; color: var(--accent); }
-  .loader-bar { width: 120px; height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  #loader { position: fixed; inset: 0; background: #fff; display: flex; align-items: center; justify-content: center; z-index: 9000; flex-direction: column; gap: 16px; }
+  .loader-bar { width: 120px; height: 3px; background: var(--border); border-radius: 3px; overflow: hidden; }
   .loader-bar::after { content: ''; display: block; width: 40%; height: 100%; background: var(--accent); animation: loadSlide 1s ease infinite; }
   @keyframes loadSlide { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
 
+  /* ── LOGO SVG ── */
+  .mc-logo-wrap { display: flex; flex-direction: column; align-items: center; }
+  .mc-logo-img { width: 110px; height: auto; }
+  .mc-tagline { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; margin-top: 4px; }
+  .mc-app-label { background: var(--accent); color: #fff; font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; padding: 4px 14px; border-radius: 20px; margin-top: 6px; }
+
   /* ── LOGIN ── */
-  #screen-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: radial-gradient(ellipse at 50% 0%, rgba(0,119,182,.12) 0%, transparent 60%); }
-  .login-logo { font-family: var(--font-display); font-size: 38px; font-weight: 900; letter-spacing: 4px; color: var(--accent); margin-bottom: 4px; }
-  .login-sub { font-size: 12px; letter-spacing: 3px; color: var(--text3); text-transform: uppercase; margin-bottom: 40px; }
-  .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px 24px; }
-  .login-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text2); letter-spacing: 1px; margin-bottom: 24px; text-transform: uppercase; }
+  #screen-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: linear-gradient(160deg, #e8f4fc 0%, #f4f7fa 50%, #eef7ee 100%); }
+  .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 32px 28px; box-shadow: var(--shadow-md); margin-top: 28px; }
+  .login-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text2); letter-spacing: 1px; margin-bottom: 22px; text-transform: uppercase; text-align: center; }
   .field { margin-bottom: 16px; }
   .field label { display: block; font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; margin-bottom: 6px; }
-  .field input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 16px; padding: 12px 14px; border-radius: var(--radius); outline: none; transition: border-color .2s; }
-  .field input:focus { border-color: var(--accent); }
-  .btn-primary { width: 100%; background: var(--accent); color: #fff; font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; border: none; border-radius: var(--radius); padding: 14px; cursor: pointer; transition: background .2s, transform .1s; margin-top: 8px; }
+  .field input { width: 100%; background: var(--bg); border: 1.5px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 16px; padding: 12px 14px; border-radius: var(--radius); outline: none; transition: border-color .2s; }
+  .field input:focus { border-color: var(--accent); background: #fff; }
+
+  /* ── BUTTONS ── */
+  .btn-primary { width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; border: none; border-radius: var(--radius); padding: 14px; cursor: pointer; transition: all .2s; margin-top: 8px; box-shadow: 0 4px 14px rgba(26,143,203,.3); }
   .btn-primary:active { transform: scale(.98); }
-  .btn-primary:hover { background: var(--accent2); }
-  .btn-secondary { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; border-radius: var(--radius); padding: 11px 18px; cursor: pointer; transition: all .2s; }
-  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
-  .btn-danger { background: rgba(230,57,70,.1); color: var(--red); border: 1px solid rgba(230,57,70,.3); font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; border-radius: var(--radius); padding: 11px 18px; cursor: pointer; transition: all .2s; }
-  .btn-green { background: var(--green); color: #fff; border: none; font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; border-radius: 14px; padding: 18px; cursor: pointer; transition: all .2s; }
-  .btn-red-big { background: var(--red); color: #fff; border: none; font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; border-radius: 14px; padding: 18px; cursor: pointer; transition: all .2s; }
+  .btn-primary:hover { box-shadow: 0 6px 20px rgba(26,143,203,.4); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+  .btn-secondary { background: var(--surface2); color: var(--text2); border: 1.5px solid var(--border); font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; border-radius: var(--radius); padding: 11px 18px; cursor: pointer; transition: all .2s; }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+  .btn-danger { background: var(--red-light); color: var(--red); border: 1.5px solid rgba(214,61,74,.25); font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; border-radius: var(--radius); padding: 11px 18px; cursor: pointer; transition: all .2s; }
+  .btn-entrar { background: var(--green); color: #fff; box-shadow: 0 3px 10px rgba(39,168,90,.25); }
+  .btn-salir { background: var(--red); color: #fff; box-shadow: 0 3px 10px rgba(214,61,74,.2); }
+  .btn-entrar:disabled, .btn-salir:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
 
   /* ── MAIN LAYOUT ── */
   #app { display: flex; flex-direction: column; min-height: 100vh; }
-  .topbar { position: sticky; top: 0; z-index: 100; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
-  .topbar-logo { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 3px; color: var(--accent); }
+  .topbar { position: sticky; top: 0; z-index: 100; background: #fff; border-bottom: 1px solid var(--border); padding: 0 16px; height: 58px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 1px 8px rgba(0,0,0,.06); }
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .topbar-logo-img { height: 36px; width: auto; }
+  .topbar-apptag { background: var(--accent); color: #fff; font-family: var(--font-display); font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; }
   .topbar-user { display: flex; align-items: center; gap: 10px; }
-  .topbar-name { font-size: 13px; color: var(--text2); font-weight: 500; }
-  .topbar-role { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
-  .btn-logout { background: none; border: 1px solid var(--border); color: var(--text3); font-size: 12px; padding: 5px 10px; border-radius: 6px; cursor: pointer; transition: all .2s; }
-  .btn-logout:hover { border-color: var(--red); color: var(--red); }
+  .topbar-name { font-size: 13px; color: var(--text2); font-weight: 600; }
+  .topbar-role { font-family: var(--font-display); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
+  .btn-logout { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .btn-logout:hover { border-color: var(--red); color: var(--red); background: var(--red-light); }
 
   /* ── TABS ── */
-  .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+  .tabs { display: flex; background: #fff; border-bottom: 2px solid var(--border); overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  .tab { flex: 1; min-width: 80px; padding: 14px 8px 12px; text-align: center; font-family: var(--font-display); font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; white-space: nowrap; }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab { flex: 1; min-width: 72px; padding: 12px 8px 10px; text-align: center; font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all .2s; white-space: nowrap; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-light); }
   .tab-icon { font-size: 18px; display: block; margin-bottom: 2px; }
 
   /* ── CONTENT ── */
@@ -87,86 +106,81 @@
   .section-title { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; color: var(--text); margin-bottom: 4px; }
   .section-sub { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
 
-  /* ── FICHAR (OPERARIO) ── */
-  .fecha-hoy { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .fecha-label { font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; }
-  .fecha-valor { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text); }
-  .reloj { font-family: var(--font-display); font-size: 36px; font-weight: 900; color: var(--accent); letter-spacing: 2px; }
+  /* ── FICHAR ── */
+  .fecha-hoy { background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 14px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; box-shadow: 0 4px 16px rgba(26,143,203,.2); }
+  .fecha-label { font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 1px; color: rgba(255,255,255,.7); text-transform: uppercase; }
+  .fecha-valor { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: #fff; }
+  .reloj { font-family: var(--font-display); font-size: 34px; font-weight: 900; color: #fff; letter-spacing: 2px; }
 
-  .servicio-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; transition: border-color .2s; }
-  .servicio-card.activo { border-color: var(--green); background: rgba(45,198,83,.04); }
+  .servicio-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; transition: all .2s; box-shadow: var(--shadow); }
+  .servicio-card.activo { border-color: var(--green); background: var(--green-light); box-shadow: 0 4px 16px rgba(39,168,90,.1); }
   .servicio-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
-  .servicio-cliente { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+  .servicio-cliente { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: .5px; color: var(--text); }
   .servicio-dir { font-size: 13px; color: var(--text2); margin-top: 2px; }
   .servicio-horario { font-size: 13px; color: var(--text3); margin-top: 6px; }
-  .servicio-horario span { color: var(--accent); font-weight: 600; }
+  .servicio-horario span { color: var(--accent); font-weight: 700; }
   .servicio-actions { display: flex; gap: 10px; margin-top: 12px; }
-  .servicio-actions button { flex: 1; padding: 12px; border-radius: var(--radius); font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; border: none; transition: all .2s; }
-  .btn-entrar { background: var(--green); color: #fff; }
-  .btn-salir { background: var(--red); color: #fff; }
-  .btn-entrar:disabled, .btn-salir:disabled { opacity: .4; cursor: not-allowed; }
+  .servicio-actions button { flex: 1; padding: 13px; border-radius: var(--radius); font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; border: none; transition: all .2s; }
 
-  .fichada-info { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 12px; color: var(--text2); }
+  .fichada-info { margin-top: 10px; padding: 10px 12px; background: var(--surface2); border-radius: 8px; font-size: 12px; color: var(--text2); border: 1px solid var(--border); }
   .fichada-row { display: flex; justify-content: space-between; padding: 3px 0; }
-  .fichada-row .val { color: var(--text); font-weight: 600; }
+  .fichada-row .val { color: var(--text); font-weight: 700; }
   .gps-ok { color: var(--green); }
   .gps-warn { color: var(--yellow); }
 
   .no-servicios { text-align: center; padding: 40px 20px; color: var(--text3); }
   .no-servicios .icon { font-size: 40px; margin-bottom: 12px; }
 
-  /* ── ADMIN PANEL ── */
-  .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-  .stat-num { font-family: var(--font-display); font-size: 36px; font-weight: 900; color: var(--accent); }
-  .stat-label { font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; margin-top: 2px; }
+  /* ── CARDS / STATS ── */
+  .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: var(--shadow); }
+  .stat-num { font-family: var(--font-display); font-size: 40px; font-weight: 900; color: var(--accent); }
+  .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; margin-top: 2px; }
 
-  .card-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  .card-section-title { font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+  .card-section { background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .card-section-title { font-family: var(--font-display); font-size: 15px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
 
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .field-sm { margin-bottom: 10px; }
-  .field-sm label { display: block; font-size: 10px; font-weight: 600; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
-  .field-sm input, .field-sm select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 14px; padding: 9px 12px; border-radius: 8px; outline: none; }
-  .field-sm input:focus, .field-sm select:focus { border-color: var(--accent); }
-  .field-sm select option { background: var(--bg); }
+  .field-sm label { display: block; font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
+  .field-sm input, .field-sm select { width: 100%; background: var(--bg); border: 1.5px solid var(--border); color: var(--text); font-family: var(--font-body); font-size: 14px; padding: 9px 12px; border-radius: 8px; outline: none; transition: border-color .2s; }
+  .field-sm input:focus, .field-sm select:focus { border-color: var(--accent); background: #fff; }
 
   .dias-check { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .dia-btn { padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text2); font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: .5px; border-radius: 6px; cursor: pointer; transition: all .2s; }
-  .dia-btn.sel { background: rgba(0,180,216,.15); border-color: var(--accent); color: var(--accent); }
+  .dia-btn { padding: 6px 11px; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text2); font-family: var(--font-display); font-size: 13px; font-weight: 700; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .dia-btn.sel { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
 
   /* ── LIST ITEMS ── */
   .list-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .list-item:last-child { border-bottom: none; }
   .list-item-info { flex: 1; }
-  .list-item-name { font-weight: 600; font-size: 15px; }
+  .list-item-name { font-weight: 600; font-size: 15px; color: var(--text); }
   .list-item-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
   .list-item-actions { display: flex; gap: 8px; }
-  .btn-icon { background: var(--bg); border: 1px solid var(--border); color: var(--text2); width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 15px; transition: all .2s; }
-  .btn-icon:hover { border-color: var(--red); color: var(--red); }
-  .btn-icon.edit:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-icon { background: var(--surface2); border: 1.5px solid var(--border); color: var(--text2); width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 15px; transition: all .2s; }
+  .btn-icon:hover { border-color: var(--red); color: var(--red); background: var(--red-light); }
+  .btn-icon.edit:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
 
   /* ── SUPERVISOR ── */
-  .fichada-supervisor { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+  .fichada-supervisor { background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow); }
   .fs-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .fs-operario { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+  .fs-operario { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text); }
   .fs-detalle { font-size: 12px; color: var(--text2); display: flex; flex-direction: column; gap: 3px; }
   .fs-actions { display: flex; gap: 8px; margin-top: 10px; }
 
   /* ── MIS HORAS ── */
-  .resumen-mes { background: linear-gradient(135deg, rgba(0,180,216,.1), rgba(0,119,182,.05)); border: 1px solid rgba(0,180,216,.2); border-radius: 12px; padding: 20px 16px; margin-bottom: 16px; text-align: center; }
-  .resumen-num { font-family: var(--font-display); font-size: 56px; font-weight: 900; color: var(--accent); line-height: 1; }
-  .resumen-label { font-size: 13px; color: var(--text2); letter-spacing: 2px; text-transform: uppercase; margin-top: 4px; }
-  .resumen-tipo { font-size: 11px; color: var(--text3); margin-top: 8px; }
+  .resumen-mes { background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 16px; padding: 24px 20px; margin-bottom: 16px; text-align: center; box-shadow: 0 6px 24px rgba(26,143,203,.25); }
+  .resumen-num { font-family: var(--font-display); font-size: 64px; font-weight: 900; color: #fff; line-height: 1; }
+  .resumen-label { font-size: 13px; color: rgba(255,255,255,.8); letter-spacing: 2px; text-transform: uppercase; margin-top: 4px; }
+  .resumen-tipo { font-size: 11px; color: rgba(255,255,255,.65); margin-top: 8px; }
 
   /* ── MODAL ── */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 500; display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
-  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px 16px 12px 12px; width: 100%; max-width: 480px; padding: 24px 20px; max-height: 90vh; overflow-y: auto; }
-  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(26,37,51,.4); backdrop-filter: blur(4px); z-index: 500; display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 20px 20px 16px 16px; width: 100%; max-width: 480px; padding: 24px 20px; max-height: 90vh; overflow-y: auto; box-shadow: 0 -8px 40px rgba(0,0,0,.12); }
+  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; color: var(--text); }
   .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
   .modal-actions button { flex: 1; }
 
-  /* ── RESPONSIVE ── */
   @media(max-width: 380px) {
     .admin-grid { grid-template-columns: 1fr; }
     .form-row { grid-template-columns: 1fr; }
@@ -175,11 +189,33 @@
 </head>
 <body>
 
+<!-- LOGO SVG MEGACLEAN (inline, basado en el original) -->
+<svg id="mc-svg-logo" style="display:none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- elipse verde exterior -->
+  <ellipse cx="100" cy="95" rx="78" ry="65" fill="none" stroke="#7ec87e" stroke-width="7"/>
+  <!-- fondo azul -->
+  <ellipse cx="100" cy="95" rx="70" ry="58" fill="#1a8fcb"/>
+  <!-- figura humana / M estilizada en blanco -->
+  <path d="M72 130 Q68 110 75 95 Q80 82 88 78 Q92 76 95 80 L100 90 L105 80 Q108 76 112 78 Q120 82 125 95 Q132 110 128 130" fill="none" stroke="white" stroke-width="7" stroke-linecap="round"/>
+  <path d="M80 125 Q85 115 100 112 Q115 115 120 125" fill="white" stroke="none"/>
+  <!-- cabeza punto verde -->
+  <circle cx="100" cy="38" r="9" fill="#5cb85c"/>
+</svg>
+
 <!-- LOADER -->
 <div id="loader">
-  <div class="loader-logo">MEGACLEAN</div>
-  <div style="font-size:11px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-top:-8px;">Control de Horas</div>
-  <div class="loader-bar"></div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+    <svg width="90" height="90" viewBox="0 0 200 190" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="100" cy="100" rx="78" ry="65" fill="none" stroke="#7ec87e" stroke-width="7"/>
+      <ellipse cx="100" cy="100" rx="70" ry="58" fill="#1a8fcb"/>
+      <path d="M72 138 Q68 116 76 100 Q82 87 90 83 Q94 81 97 85 L100 94 L103 85 Q106 81 110 83 Q118 87 124 100 Q132 116 128 138" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M78 132 Q90 120 100 118 Q110 120 122 132" fill="white"/>
+      <circle cx="100" cy="42" r="10" fill="#5cb85c"/>
+    </svg>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;letter-spacing:3px;color:#1a8fcb">MegaClean</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px;color:#8fa3b8;text-transform:uppercase">Gestión de Horas</div>
+  </div>
+  <div class="loader-bar" style="margin-top:8px"></div>
 </div>
 
 <!-- TOAST -->
@@ -187,26 +223,142 @@
 
 <!-- LOGIN -->
 <div id="screen-login" class="hidden">
-  <div class="login-logo">MEGACLEAN</div>
-  <div class="login-sub">Control de Horas</div>
-  <div class="login-card">
-    <div class="login-title">Ingresar</div>
-    <div class="field">
-      <label>DNI</label>
-      <input type="number" id="login-dni" placeholder="Ej: 30123456" inputmode="numeric">
+
+  <!-- Fondo con ondas SVG igual al mockup -->
+  <div style="position:fixed;inset:0;z-index:0;overflow:hidden;background:linear-gradient(135deg,#deeef8 0%,#eaf3fb 40%,#f0f7f0 100%)">
+    <!-- Onda grande izquierda -->
+    <svg style="position:absolute;left:-80px;top:-40px;opacity:.55" width="520" height="520" viewBox="0 0 520 520" xmlns="http://www.w3.org/2000/svg">
+      <path d="M60 480 Q-60 320 80 200 Q200 90 300 160 Q420 240 360 380 Q300 500 60 480Z" fill="none" stroke="#1a8fcb" stroke-width="2.5"/>
+      <path d="M30 460 Q-90 300 60 180 Q180 70 280 140 Q400 220 340 360 Q280 480 30 460Z" fill="none" stroke="#1a8fcb" stroke-width="1.5" opacity=".4"/>
+    </svg>
+    <!-- Onda derecha -->
+    <svg style="position:absolute;right:-60px;top:30px;opacity:.45" width="420" height="480" viewBox="0 0 420 480" xmlns="http://www.w3.org/2000/svg">
+      <path d="M380 20 Q500 160 380 300 Q260 440 160 380 Q40 300 100 180 Q160 60 380 20Z" fill="none" stroke="#1a8fcb" stroke-width="2"/>
+      <path d="M360 40 Q480 180 360 320 Q240 460 140 400 Q20 320 80 200 Q140 80 360 40Z" fill="none" stroke="#5cb85c" stroke-width="1.5" opacity=".5"/>
+    </svg>
+    <!-- Onda inferior derecha verde -->
+    <svg style="position:absolute;right:20px;bottom:-40px;opacity:.35" width="300" height="280" viewBox="0 0 300 280" xmlns="http://www.w3.org/2000/svg">
+      <path d="M280 260 Q340 160 260 80 Q180 0 100 60 Q20 120 60 220 Q100 300 280 260Z" fill="none" stroke="#5cb85c" stroke-width="2"/>
+    </svg>
+    <!-- Puntos decorativos derecha arriba -->
+    <svg style="position:absolute;right:24px;top:24px;opacity:.35" width="120" height="80" viewBox="0 0 120 80">
+      ${Array.from({length:15},(_,i)=>`<circle cx="${(i%5)*22+6}" cy="${Math.floor(i/5)*22+6}" r="2.5" fill="#1a8fcb"/>`).join('')}
+    </svg>
+    <!-- Puntos decorativos izquierda abajo -->
+    <svg style="position:absolute;left:16px;bottom:80px;opacity:.3" width="100" height="80" viewBox="0 0 100 80">
+      ${Array.from({length:12},(_,i)=>`<circle cx="${(i%4)*22+6}" cy="${Math.floor(i/4)*22+6}" r="2.5" fill="#1a8fcb"/>`).join('')}
+    </svg>
+  </div>
+
+  <!-- Contenido centrado -->
+  <div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;width:100%;min-height:100vh;justify-content:center;padding:24px 16px">
+
+    <!-- Logo -->
+    <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:6px">
+      <svg width="96" height="96" viewBox="0 0 200 190" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 6px 18px rgba(26,143,203,.25))">
+        <ellipse cx="100" cy="100" rx="78" ry="65" fill="none" stroke="#7ec87e" stroke-width="7"/>
+        <ellipse cx="100" cy="100" rx="70" ry="58" fill="#1a8fcb"/>
+        <path d="M72 138 Q68 116 76 100 Q82 87 90 83 Q94 81 97 85 L100 94 L103 85 Q106 81 110 83 Q118 87 124 100 Q132 116 128 138" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M78 132 Q90 120 100 118 Q110 120 122 132" fill="white"/>
+        <circle cx="100" cy="42" r="10" fill="#5cb85c"/>
+      </svg>
+      <div style="margin-top:10px;font-family:'Barlow',sans-serif;font-size:28px;font-weight:400;color:#1a8fcb;letter-spacing:.5px">
+        Mega<span style="font-weight:700">Clean</span><sup style="font-size:14px;font-weight:700;color:#1a8fcb">®</sup>
+      </div>
+      <div style="font-family:'Barlow',sans-serif;font-size:13px;color:#6b8fa8;margin-top:2px">Sabemos de Limpieza</div>
+      <div style="margin-top:10px;background:#1a8fcb;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;padding:5px 20px;border-radius:20px">Gestión de Horas</div>
     </div>
-    <div class="field">
-      <label>Contraseña</label>
-      <input type="password" id="login-pass" placeholder="••••••••">
+
+    <!-- Card de login -->
+    <div style="width:100%;max-width:380px;background:#fff;border-radius:20px;padding:32px 28px;box-shadow:0 8px 40px rgba(26,143,203,.13);margin-top:20px">
+
+      <div style="text-align:center;margin-bottom:24px">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#1a2533">Acceso al Sistema</div>
+        <div style="width:36px;height:3px;background:#1a8fcb;border-radius:2px;margin:8px auto 0"></div>
+      </div>
+
+      <!-- Campo DNI -->
+      <div style="margin-bottom:18px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;color:#8fa3b8;text-transform:uppercase;margin-bottom:6px">DNI / Usuario</div>
+        <div style="display:flex;align-items:center;border:1.5px solid #dce3ed;border-radius:12px;background:#f8fafc;transition:border-color .2s;overflow:hidden" id="dni-wrap">
+          <div style="padding:0 14px;color:#1a8fcb">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <input type="text" id="login-dni" placeholder="Ej: 30123456" inputmode="numeric" autocomplete="username"
+            style="flex:1;border:none;background:transparent;color:#1a2533;font-family:'Barlow',sans-serif;font-size:15px;padding:13px 14px 13px 0;outline:none"
+            onfocus="document.getElementById('dni-wrap').style.borderColor='#1a8fcb';document.getElementById('dni-wrap').style.background='#fff'"
+            onblur="document.getElementById('dni-wrap').style.borderColor='#dce3ed';document.getElementById('dni-wrap').style.background='#f8fafc'">
+        </div>
+      </div>
+
+      <!-- Campo Contraseña -->
+      <div style="margin-bottom:24px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;color:#8fa3b8;text-transform:uppercase;margin-bottom:6px">Contraseña</div>
+        <div style="display:flex;align-items:center;border:1.5px solid #dce3ed;border-radius:12px;background:#f8fafc;transition:border-color .2s;overflow:hidden" id="pass-wrap">
+          <div style="padding:0 14px;color:#1a8fcb">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"
+            style="flex:1;border:none;background:transparent;color:#1a2533;font-family:'Barlow',sans-serif;font-size:15px;padding:13px 0;outline:none"
+            onfocus="document.getElementById('pass-wrap').style.borderColor='#1a8fcb';document.getElementById('pass-wrap').style.background='#fff'"
+            onblur="document.getElementById('pass-wrap').style.borderColor='#dce3ed';document.getElementById('pass-wrap').style.background='#f8fafc'">
+          <button onclick="togglePassVis()" style="border:none;background:transparent;padding:0 14px;cursor:pointer;color:#8fa3b8" id="btn-eye" title="Mostrar/ocultar">
+            <svg id="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Botón ingresar -->
+      <button onclick="doLogin()" style="width:100%;background:linear-gradient(135deg,#1a8fcb,#0e6fa0);color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;letter-spacing:3px;text-transform:uppercase;border:none;border-radius:12px;padding:15px;cursor:pointer;box-shadow:0 6px 20px rgba(26,143,203,.35);transition:all .2s"
+        onmouseover="this.style.boxShadow='0 8px 28px rgba(26,143,203,.45)'"
+        onmouseout="this.style.boxShadow='0 6px 20px rgba(26,143,203,.35)'">
+        Ingresar
+      </button>
+
+      <div style="text-align:center;margin-top:16px;font-size:11px;color:#b0c4d4">MegaClean · Sistema interno · v2.0</div>
     </div>
-    <button class="btn-primary" onclick="doLogin()">ENTRAR</button>
+
+    <!-- Íconos de features abajo -->
+    <div style="display:flex;gap:24px;margin-top:32px;justify-content:center">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+        <div style="width:52px;height:52px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(26,143,203,.12)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1a8fcb" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <span style="font-size:10px;color:#8fa3b8;font-weight:600;letter-spacing:.5px">Operarios</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+        <div style="width:52px;height:52px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(26,143,203,.12)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1a8fcb" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        </div>
+        <span style="font-size:10px;color:#8fa3b8;font-weight:600;letter-spacing:.5px">Geoloc.</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+        <div style="width:52px;height:52px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(26,143,203,.12)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1a8fcb" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </div>
+        <span style="font-size:10px;color:#8fa3b8;font-weight:600;letter-spacing:.5px">Reportes</span>
+      </div>
+    </div>
+
   </div>
 </div>
 
 <!-- APP MAIN -->
 <div id="app" class="hidden">
   <div class="topbar">
-    <div class="topbar-logo">MEGACLEAN</div>
+    <div class="topbar-left">
+      <svg height="34" viewBox="0 0 200 190" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="100" cy="100" rx="78" ry="65" fill="none" stroke="#7ec87e" stroke-width="7"/>
+        <ellipse cx="100" cy="100" rx="70" ry="58" fill="#1a8fcb"/>
+        <path d="M72 138 Q68 116 76 100 Q82 87 90 83 Q94 81 97 85 L100 94 L103 85 Q106 81 110 83 Q118 87 124 100 Q132 116 128 138" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M78 132 Q90 120 100 118 Q110 120 122 132" fill="white"/>
+        <circle cx="100" cy="42" r="10" fill="#5cb85c"/>
+      </svg>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;letter-spacing:2px;color:var(--accent);line-height:1">MegaClean</div>
+        <div class="topbar-apptag">Gestión de Horas</div>
+      </div>
+    </div>
     <div class="topbar-user">
       <div>
         <div class="topbar-name" id="topbar-name">—</div>
@@ -327,27 +479,35 @@ function toast(msg, type = 'info') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// ════════════════════════════════════════════
-//  AUTH
-// ════════════════════════════════════════════
+function togglePassVis() {
+  const inp = document.getElementById('login-pass');
+  const ico = document.getElementById('eye-icon');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    ico.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+  } else {
+    inp.type = 'password';
+    ico.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  }
+}
+
+
 async function doLogin() {
   const dni = document.getElementById('login-dni').value.trim();
   const pass = document.getElementById('login-pass').value.trim();
   if (!dni || !pass) return toast('Ingresá DNI y contraseña', 'warn');
 
-  // Admin hardcoded
-  if (dni === 'admin' || dni === 'ADMIN') {
-    if (pass === 'admin1234') {
-      currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni: 'admin' };
+  // Admin hardcoded — acepta "admin", "ADMIN", o DNI 25365716
+  const dniLower = dni.toLowerCase();
+  if (dniLower === 'admin' || dni === '25365716') {
+    const claveOk = (dniLower === 'admin' && pass === 'admin1234') || (dni === '25365716' && pass === '1945');
+    if (claveOk) {
+      currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni: dni };
       iniciarApp();
       return;
+    } else {
+      return toast('Contraseña incorrecta', 'error');
     }
-  }
-  // Roberto hardcoded
-  if (dni === '25365716' && pass === '1945') {
-    currentUser = { _id: 'roberto', nombre: 'Roberto', rol: 'ADMIN', dni: '25365716' };
-    iniciarApp();
-    return;
   }
 
   showLoader(true);
