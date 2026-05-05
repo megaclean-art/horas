@@ -475,6 +475,15 @@ function toast(msg, type = 'info') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
+window.onerror = function(msg, src, line, col, err) {
+  console.error('JS Error:', msg, 'line:', line);
+  // Si hay error al inicio, igual mostrar el login
+  const loader = document.getElementById('loader');
+  const login = document.getElementById('screen-login');
+  if (loader) loader.style.display = 'none';
+  if (login) login.classList.remove('hidden');
+};
+
 function togglePassVis() {
   const inp = document.getElementById('login-pass');
   const ico = document.getElementById('eye-icon');
@@ -2163,14 +2172,32 @@ async function exportarFeriadosMes() {
 //  INIT
 // ════════════════════════════════════════════
 window.addEventListener('load', () => {
-  setTimeout(() => {
-    document.getElementById('loader').style.display = 'none';
-    document.getElementById('screen-login').classList.remove('hidden');
-    // Enter key en login
-    document.getElementById('login-pass').addEventListener('keydown', e => {
+  // Forzar ocultar loader siempre, incluso si hay errores
+  function mostrarLogin() {
+    const loader = document.getElementById('loader');
+    const login = document.getElementById('screen-login');
+    if (loader) loader.style.display = 'none';
+    if (login) login.classList.remove('hidden');
+    const passInput = document.getElementById('login-pass');
+    if (passInput) passInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') doLogin();
     });
-  }, 1200);
+    const dniInput = document.getElementById('login-dni');
+    if (dniInput) dniInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+  }
+
+  // Intentar con timeout normal
+  setTimeout(mostrarLogin, 1000);
+
+  // Seguro de respaldo: si en 4 segundos no se ocultó, forzar
+  setTimeout(() => {
+    const loader = document.getElementById('loader');
+    if (loader && loader.style.display !== 'none') {
+      mostrarLogin();
+    }
+  }, 4000);
 });
 </script>
 </body>
