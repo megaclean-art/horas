@@ -2216,36 +2216,38 @@ async function renderReporteBancoHoras() {
   const mesActual = isoHoy().slice(0, 7);
   const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mesActual));
 
-  // Calcular horas trabajadas este mes por operario
-  const horasTrabajadas = {};
+  // Horas fichadas reales este mes por operario (para variables)
+  const horasFichadasMes = {};
   for (const f of fichadasMes) {
     if (!f.operarioId || !f.horasTrabajadas) continue;
-    horasTrabajadas[f.operarioId] = (horasTrabajadas[f.operarioId] || 0) + f.horasTrabajadas;
+    horasFichadasMes[f.operarioId] = (horasFichadasMes[f.operarioId] || 0) + f.horasTrabajadas;
   }
 
-  // Para operarios FIJO sin fichadas aún, calcular por servicios asignados
+  // Horas fijas por operario = sumar (horasContratadas × diasPorSemana × 4 semanas)
+  // para cada servicio donde está asignado
   const horasFijasMes = {};
   for (const s of servicios) {
-    const ops = Array.isArray(s.operarios) ? s.operarios : [];
-    for (const opId of ops) {
-      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + (s.horasContratadas || 0) * (s.dias?.length || 0);
+    const opsS = Array.isArray(s.operarios) ? s.operarios : [];
+    const hsMensuales = (Number(s.horasContratadas)||0) * (s.dias?.length||0) * 4;
+    for (const opId of opsS) {
+      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + hsMensuales;
     }
   }
 
-  // Armar tabla de operarios
+  // Total = horas fijas (servicios asignados × 4 semanas) + horas variables fichadas
+  // Un mismo operario puede tener ambas simultáneamente
   const ops = operarios.filter(o => o.rol === 'OPERARIO' && o.horasRecibo);
   const rows = ops.map(o => {
     const recibo = Number(o.horasRecibo) || 0;
-    let trabajadas = 0;
-    if (o.tipo === 'FIJO') {
-      // Fijo: usar horas semanales × 4 o servicios asignados
-      trabajadas = o.horasSemana ? Number(o.horasSemana) * 4 : (horasTrabajadas[o._id] || 0);
-    } else {
-      trabajadas = horasTrabajadas[o._id] || 0;
-    }
+    const hsFijas = horasFijasMes[o._id] || 0;
+    const hsVariables = horasFichadasMes[o._id] || 0;
+    const trabajadas = hsFijas + hsVariables;
+    const fuente = hsFijas > 0 && hsVariables > 0 ? 'MIXTO'
+      : hsFijas > 0 ? 'FIJO'
+      : hsVariables > 0 ? 'VARIABLE' : '—';
     const diff = trabajadas - recibo;
-    return { op: o, recibo, trabajadas, diff };
-  }).sort((a, b) => a.diff - b.diff); // Los que más nos deben primero (diff más negativo)
+    return { op: o, recibo, trabajadas, hsFijas, hsVariables, diff, fuente };
+  }).sort((a, b) => a.diff - b.diff);
 
   const nosDebenCount = rows.filter(r => r.diff < 0).length;
   const debemosCount = rows.filter(r => r.diff > 0).length;
@@ -2323,7 +2325,7 @@ function filtrarBanco() {
       return `<div style="padding:11px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;align-items:center;${bg}">
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--text)">${r.op.nombre}</div>
-          <div style="font-size:11px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · ${r.op.tipo||'FIJO'}</div>
+          <div style="font-size:11px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · <span style="background:${r.fuente==='FIJO'?'var(--accent-light)':r.fuente==='VARIABLE'?'var(--yellow-light)':'rgba(39,168,90,.1)'};color:${r.fuente==='FIJO'?'var(--accent)':r.fuente==='VARIABLE'?'var(--yellow)':'var(--green)'};padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">${r.fuente}</span>${r.fuente==='MIXTO'?` <span style="font-size:10px;color:var(--text3)">(${r.hsFijas.toFixed(0)}f+${r.hsVariables.toFixed(1)}v)</span>`:''}</div>
         </div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.recibo}</div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.trabajadas.toFixed(1)}</div>
@@ -2378,8 +2380,11 @@ async function renderReporteOperario() {
     const srvs = servicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
     const hsRecibo = Number(o.horasRecibo) || 0;
     const hsReales = fichadasMes.filter(f=>f.operarioId===o._id).reduce((s,f)=>s+(f.horasTrabajadas||0),0);
-    const hsFijas = o.tipo==='FIJO' && o.horasSemana ? Number(o.horasSemana)*4 : hsReales;
-    return { op: o, srvs, hsRecibo, hsFijas, hsReales };
+    // Fijas: suma de todos sus servicios asignados × diasSemana × 4
+    const hsFijas = srvs.reduce((sum,s) => sum + (Number(s.horasContratadas)||0)*(s.dias?.length||0)*4, 0);
+    // Total = fijas + variables fichadas
+    const hsTotales = hsFijas + hsReales;
+    return { op: o, srvs, hsRecibo, hsFijas, hsVariables: hsReales, hsFijas_display: hsFijas, hsTotales };
   }).sort((a,b)=>a.op.nombre.localeCompare(b.op.nombre));
 
   filtrarRepOp();
@@ -2530,12 +2535,15 @@ async function renderReporteMensual() {
     const fichOp = fichadasMes.filter(f=>f.operarioId===o._id);
     const hsFichadas = fichOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
     const hsFeriado = fichOp.filter(f=>f.esFeriado).reduce((s,f)=>s+(f.horasTrabajadas||0),0);
-    const hsMes = o.tipo==='FIJO' ? (o.horasSemana?Number(o.horasSemana)*4:hsFichadas) : hsFichadas;
+    // Fijas: servicios asignados × horasContratadas × diasSemana × 4
+    const hsFijas = srvs.reduce((sum,s)=>sum+(Number(s.horasContratadas)||0)*(s.dias?.length||0)*4, 0);
+    // Total = fijas + variables fichadas
+    const hsMes = hsFijas + hsFichadas;
     const diff = hsMes - recibo;
     totalReciboMes += recibo;
     totalTrabajadasMes += hsMes;
     totalFeriadosHs += hsFeriado;
-    return { o, recibo, hsMes, diff, hsFeriado, cantSrvs: srvs.length };
+    return { o, recibo, hsMes, hsFijas, hsVariables: hsFichadas, diff, hsFeriado, cantSrvs: srvs.length };
   }).sort((a,b)=>a.diff-b.diff);
 
   c.innerHTML = `
