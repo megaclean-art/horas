@@ -542,11 +542,13 @@ const TABS = {
     { id: 'operarios', icon: '👷', label: 'Operarios' },
     { id: 'servicios', icon: '🏢', label: 'Servicios' },
     { id: 'coberturas', icon: '🔄', label: 'Coberturas' },
+    { id: 'feriados', icon: '📅', label: 'Feriados' },
     { id: 'fichadas', icon: '📋', label: 'Fichadas' },
   ],
   SUPERVISOR: [
     { id: 'supervisor', icon: '🔍', label: 'Control' },
     { id: 'coberturas', icon: '🔄', label: 'Coberturas' },
+    { id: 'feriados', icon: '📅', label: 'Feriados' },
     { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
   ],
   OPERARIO: [
@@ -571,7 +573,7 @@ function navigateTo(id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   const tab = document.getElementById('tab-' + id);
   if (tab) tab.classList.add('active');
-  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, coberturas: renderCoberturas };
+  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, coberturas: renderCoberturas, feriados: renderFeriados };
   if (screens[id]) screens[id]();
 }
 
@@ -1875,7 +1877,285 @@ async function cargarCoberturasHoy() {
 }
 
 
-function cerrarModal() {
+
+
+// ════════════════════════════════════════════
+//  MÓDULO: FERIADOS
+// ════════════════════════════════════════════
+let _feriadosCache = [];
+
+function formatFecha(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+function diaSemanaDeISO(iso) {
+  const dias = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  return dias[new Date(iso + 'T12:00:00').getDay()];
+}
+
+async function renderFeriados() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Feriados</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const feriados = await fsList('horas_feriados');
+  _feriadosCache = feriados.sort((a,b) => a.fecha.localeCompare(b.fecha));
+
+  const hoy = isoHoy();
+  const proximos = _feriadosCache.filter(f => f.fecha >= hoy);
+  const pasados  = _feriadosCache.filter(f => f.fecha < hoy);
+  const totalAsig = _feriadosCache.reduce((s,f) => s + parsearAsignaciones(f.asignaciones).length, 0);
+
+  c.innerHTML = `
+    <div class="section-title">Feriados</div>
+    <div class="section-sub">Días con adicional — operarios y facturación</div>
+    <div class="admin-grid" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-num">${proximos.length}</div><div class="stat-label">Próximos</div></div>
+      <div class="stat-card"><div class="stat-num">${totalAsig}</div><div class="stat-label">Asignaciones</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn-primary" style="flex:1;min-width:160px" onclick="modalFeriado()">+ NUEVO FERIADO</button>
+      <button class="btn-secondary" style="flex:1;min-width:160px" onclick="exportarFeriadosMes()">⬇ EXPORTAR MES</button>
+    </div>
+    ${proximos.length > 0 ? `<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Próximos y vigentes</div>${proximos.map(f => renderFeriadoCard(f, false)).join('')}` : ''}
+    ${pasados.length > 0 ? `<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin:16px 0 8px">Historial</div>${pasados.map(f => renderFeriadoCard(f, true)).join('')}` : ''}
+    ${_feriadosCache.length === 0 ? `<div class="card-section"><div style="text-align:center;padding:24px;color:var(--text3)">Sin feriados cargados</div></div>` : ''}`;
+}
+
+function parsearAsignaciones(raw) {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map(a => { try { return typeof a === 'string' ? JSON.parse(a) : a; } catch { return null; } }).filter(Boolean);
+}
+
+function renderFeriadoCard(f, pasado) {
+  const asigs = parsearAsignaciones(f.asignaciones);
+  const esHoy = f.fecha === isoHoy();
+  return `<div class="card-section" style="margin-bottom:10px;${pasado?'opacity:.72':''}">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">
+          <span style="font-family:var(--font-display);font-size:22px;font-weight:900;color:var(--accent)">${formatFecha(f.fecha)}</span>
+          <span style="font-size:13px;color:var(--text2)">${diaSemanaDeISO(f.fecha)}</span>
+          ${esHoy?`<span class="pill pill-green">HOY</span>`:''}
+          ${pasado?`<span class="pill pill-gray">Pasado</span>`:''}
+        </div>
+        <div style="font-family:var(--font-display);font-size:19px;font-weight:700;color:var(--text)">${f.nombre||'—'}</div>
+        ${f.descripcion?`<div style="font-size:12px;color:var(--text2);margin-top:2px">${f.descripcion}</div>`:''}
+        <div style="margin-top:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Operarios asignados (${asigs.length})</div>
+          ${asigs.length === 0
+            ? `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin asignaciones</div>`
+            : asigs.map(a => `
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;border:1px solid var(--border)">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--text)">${a.operarioNombre}</div>
+                  <div style="font-size:11px;color:var(--text2)">🏢 ${a.clienteNombre} · ${a.horaInicio||'--:--'} – ${a.horaFin||'--:--'} · <strong>${a.horasEstimadas||0}hs</strong></div>
+                  ${a.nota?`<div style="font-size:11px;color:var(--accent);margin-top:1px">💬 ${a.nota}</div>`:''}
+                </div>
+                ${!pasado?`<button class="btn-icon" onclick="eliminarAsignacionFeriado('${f._id}','${a.operarioId}')">🗑</button>`:''}
+              </div>`).join('')}
+          ${!pasado?`<button class="btn-secondary" style="margin-top:8px;padding:7px 14px;font-size:13px" onclick="modalAsignarFeriado('${f._id}')">+ Agregar operario</button>`:''}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button class="btn-icon edit" onclick="modalFeriado('${f._id}')">✏️</button>
+        <button class="btn-icon" title="Exportar" onclick="exportarFeriado('${f._id}')">⬇</button>
+        <button class="btn-icon" onclick="eliminarFeriado('${f._id}','${f.nombre}')">🗑</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function modalFeriado(id = null) {
+  let f = id ? (await fsGet('horas_feriados', id) || {}) : {};
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">${id ? 'Editar Feriado' : 'Nuevo Feriado'}</div>
+        <div class="field-sm"><label>Fecha</label><input id="fer-fecha" type="date" value="${f.fecha||isoHoy()}"></div>
+        <div class="field-sm"><label>Nombre del feriado</label><input id="fer-nombre" placeholder="Ej: Día de la Independencia" value="${f.nombre||''}"></div>
+        <div class="field-sm"><label>Nota interna <span style="color:var(--text3);font-size:10px">(opcional)</span></label><input id="fer-desc" placeholder="Ej: Feriado nacional inamovible" value="${f.descripcion||''}"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarFeriado('${id||''}')">
+            ${id ? '💾 GUARDAR CAMBIOS' : '✓ CREAR FERIADO'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function guardarFeriado(id = '') {
+  const fecha   = document.getElementById('fer-fecha').value;
+  const nombre  = document.getElementById('fer-nombre').value.trim();
+  const descripcion = document.getElementById('fer-desc').value.trim();
+  if (!fecha)  return toast('La fecha es obligatoria', 'warn');
+  if (!nombre) return toast('El nombre es obligatorio', 'warn');
+  if (id) {
+    await fsSave('horas_feriados', id, { fecha, nombre, descripcion });
+    toast(`✓ ${nombre} actualizado`, 'ok');
+  } else {
+    await fsAdd('horas_feriados', { fecha, nombre, descripcion, asignaciones: [], creadoPor: currentUser.nombre, fechaCreacion: isoHoy() });
+    toast(`✓ Feriado "${nombre}" creado`, 'ok');
+  }
+  cerrarModal(); renderFeriados();
+}
+
+async function eliminarFeriado(id, nombre) {
+  if (!confirm(`¿Eliminar "${nombre}"?`)) return;
+  await fsDelete('horas_feriados', id);
+  toast(`${nombre} eliminado`, 'ok');
+  renderFeriados();
+}
+
+async function modalAsignarFeriado(feriadoId) {
+  const [feriado, operarios, servicios] = await Promise.all([
+    fsGet('horas_feriados', feriadoId), fsList('horas_usuarios'), fsList('horas_servicios')
+  ]);
+  const yaAsig = parsearAsignaciones(feriado?.asignaciones).map(a => a.operarioId);
+  const ops = operarios.filter(o => o.rol === 'OPERARIO').sort((a,b) => a.nombre.localeCompare(b.nombre));
+  const srvOpts = servicios.sort((a,b) => (a.cliente||'').localeCompare(b.cliente||'')).map(s =>
+    `<option value="${s._id}" data-nombre="${s.cliente}" data-hi="${s.horaInicio||''}" data-hf="${s.horaFin||''}" data-hs="${s.horasContratadas||0}">${s.cliente}${s.codigo?' #'+s.codigo:''}</option>`).join('');
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">Asignar Operario</div>
+        <div style="background:var(--accent-light);border:1px solid rgba(26,143,203,.2);border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--accent);font-weight:600">
+          📅 ${formatFecha(feriado?.fecha)} — ${feriado?.nombre||''}
+        </div>
+        <div class="field-sm">
+          <label>Operario</label>
+          <input id="fasig-op-q" placeholder="🔍 Filtrar..." oninput="document.querySelectorAll('#fasig-op option').forEach(o=>o.style.display=o.text.toLowerCase().includes(this.value.toLowerCase())?'':' none')"
+            style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;outline:none;margin-bottom:4px">
+          <select id="fasig-op" size="5" style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:4px;border-radius:8px;font-size:13px">
+            ${ops.map(o => `<option value="${o._id}" data-nombre="${o.nombre}" ${yaAsig.includes(o._id)?'disabled style="color:var(--text3)"':''}>${o.nombre}${yaAsig.includes(o._id)?' ✓':''}${o.dni?' · '+o.dni:''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field-sm">
+          <label>Objetivo</label>
+          <input id="fasig-srv-q" placeholder="🔍 Filtrar..." oninput="document.querySelectorAll('#fasig-srv option').forEach(o=>o.style.display=o.text.toLowerCase().includes(this.value.toLowerCase())?'':' none')"
+            style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;outline:none;margin-bottom:4px">
+          <select id="fasig-srv" size="5" style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:4px;border-radius:8px;font-size:13px"
+            onchange="(function(){const o=this.options[this.selectedIndex];if(o){document.getElementById('fasig-hi').value=o.dataset.hi||'';document.getElementById('fasig-hf').value=o.dataset.hf||'';document.getElementById('fasig-hs').value=o.dataset.hs||'';}}).call(this)">
+            ${srvOpts}
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="field-sm"><label>Hora inicio</label><input id="fasig-hi" type="time"></div>
+          <div class="field-sm"><label>Hora fin</label><input id="fasig-hf" type="time"></div>
+        </div>
+        <div class="field-sm"><label>Horas estimadas</label><input id="fasig-hs" type="number" step="0.5" placeholder="Ej: 2"></div>
+        <div class="field-sm"><label>Nota para el operario <span style="color:var(--text3);font-size:10px">(aparece en su app)</span></label><input id="fasig-nota" placeholder="Ej: Presentarse en portería a las 8hs"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarAsigFeriado('${feriadoId}')">✓ ASIGNAR</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function guardarAsigFeriado(feriadoId) {
+  const opSel  = document.getElementById('fasig-op');
+  const srvSel = document.getElementById('fasig-srv');
+  const operarioId      = opSel?.value || '';
+  const operarioNombre  = opSel?.options[opSel.selectedIndex]?.dataset?.nombre || '';
+  const servicioId      = srvSel?.value || '';
+  const clienteNombre   = srvSel?.options[srvSel.selectedIndex]?.dataset?.nombre || '';
+  const horaInicio      = document.getElementById('fasig-hi').value;
+  const horaFin         = document.getElementById('fasig-hf').value;
+  const horasEstimadas  = Number(document.getElementById('fasig-hs').value) || 0;
+  const nota            = document.getElementById('fasig-nota').value.trim();
+
+  if (!operarioId) return toast('Seleccioná un operario', 'warn');
+  if (!servicioId) return toast('Seleccioná un objetivo', 'warn');
+  if (!horaInicio || !horaFin) return toast('Ingresá el horario', 'warn');
+
+  const feriado = await fsGet('horas_feriados', feriadoId);
+  const actuales = parsearAsignaciones(feriado?.asignaciones);
+  if (actuales.find(a => a.operarioId === operarioId)) return toast('Operario ya asignado', 'warn');
+
+  const nueva = { operarioId, operarioNombre, servicioId, clienteNombre, horaInicio, horaFin, horasEstimadas, nota };
+  const nuevas = [...actuales, nueva].map(a => JSON.stringify(a));
+  await fsSave('horas_feriados', feriadoId, { asignaciones: nuevas });
+  toast(`✓ ${operarioNombre} asignado`, 'ok');
+  cerrarModal(); renderFeriados();
+}
+
+async function eliminarAsignacionFeriado(feriadoId, operarioId) {
+  if (!confirm('¿Quitar este operario del feriado?')) return;
+  const feriado = await fsGet('horas_feriados', feriadoId);
+  const nuevas = parsearAsignaciones(feriado?.asignaciones)
+    .filter(a => a.operarioId !== operarioId)
+    .map(a => JSON.stringify(a));
+  await fsSave('horas_feriados', feriadoId, { asignaciones: nuevas });
+  toast('Operario quitado', 'ok'); renderFeriados();
+}
+
+// ── RECORDATORIO para el operario en pantalla fichar ──
+async function cargarRecordatorioFeriados() {
+  try {
+    const feriados = await fsList('horas_feriados');
+    const hoy = feriados.find(f => f.fecha === isoHoy());
+    if (!hoy) return null;
+    const miAsig = parsearAsignaciones(hoy.asignaciones).find(a => a.operarioId === currentUser._id);
+    return miAsig ? { feriado: hoy, asignacion: miAsig } : null;
+  } catch { return null; }
+}
+
+// ── EXPORTAR UN FERIADO ──
+async function exportarFeriado(feriadoId) {
+  const feriado = await fsGet('horas_feriados', feriadoId);
+  if (!feriado) return toast('No se encontró el feriado', 'error');
+  const fichadasDia = (await fsList('horas_fichadas')).filter(f => f.fecha === feriado.fecha);
+  const asigs = parsearAsignaciones(feriado.asignaciones);
+
+  let csv = `REPORTE FERIADO;${feriado.nombre};${formatFecha(feriado.fecha)}\n\n`;
+  csv += `Operario;Objetivo;Hora Entrada;Hora Salida;Hs Trabajadas;Hs Estimadas;GPS OK;Diferencia (hs)\n`;
+  for (const a of asigs) {
+    const f = fichadasDia.find(f => f.operarioId === a.operarioId && f.servicioId === a.servicioId);
+    const hs = f?.horasTrabajadas || 0;
+    csv += [a.operarioNombre, a.clienteNombre, f?.entrada||'', f?.salida||'', hs?hs.toFixed(1):'(sin fichar)', a.horasEstimadas||0, f?(f.gpsOk?'SI':'NO'):'—', hs?(hs-(a.horasEstimadas||0)).toFixed(1):'—'].join(';') + '\n';
+  }
+  const totalEst  = asigs.reduce((s,a) => s+(a.horasEstimadas||0), 0);
+  const totalReal = asigs.reduce((s,a) => { const f=fichadasDia.find(f=>f.operarioId===a.operarioId&&f.servicioId===a.servicioId); return s+(f?.horasTrabajadas||0); }, 0);
+  csv += `\n;;TOTALES;;;${totalReal.toFixed(1)};${totalEst.toFixed(1)};;\n`;
+
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `Feriado_${feriado.nombre.replace(/\s+/g,'_')}_${feriado.fecha}.csv`;
+  link.click(); toast('✓ Reporte exportado', 'ok');
+}
+
+// ── EXPORTAR TODOS LOS FERIADOS DEL MES ──
+async function exportarFeriadosMes() {
+  const mes = isoHoy().slice(0,7);
+  const feriados = (await fsList('horas_feriados')).filter(f => f.fecha?.startsWith(mes));
+  if (!feriados.length) return toast('No hay feriados este mes', 'warn');
+  const fichadas = await fsList('horas_fichadas');
+
+  let csv = `REPORTE FERIADOS;${mes}\n\n`;
+  csv += `Feriado;Fecha;Dia;Operario;Objetivo;Hs Estimadas;Hs Reales;GPS OK;Diferencia\n`;
+  for (const fer of feriados.sort((a,b)=>a.fecha.localeCompare(b.fecha))) {
+    const asigs = parsearAsignaciones(fer.asignaciones);
+    if (!asigs.length) { csv += `${fer.nombre};${formatFecha(fer.fecha)};${diaSemanaDeISO(fer.fecha)};Sin asignaciones;;;;;;;\n`; continue; }
+    for (const a of asigs) {
+      const f = fichadas.find(f => f.fecha===fer.fecha && f.operarioId===a.operarioId && f.servicioId===a.servicioId);
+      const hs = f?.horasTrabajadas||0;
+      csv += [fer.nombre, formatFecha(fer.fecha), diaSemanaDeISO(fer.fecha), a.operarioNombre, a.clienteNombre, a.horasEstimadas||0, hs?hs.toFixed(1):'(sin fichar)', f?(f.gpsOk?'SI':'NO'):'—', hs?(hs-(a.horasEstimadas||0)).toFixed(1):'—'].join(';') + '\n';
+    }
+  }
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `Feriados_${mes}.csv`;
+  link.click(); toast('✓ Reporte mensual exportado', 'ok');
+}
+
+
   document.getElementById('modal-container').innerHTML = '';
 }
 
