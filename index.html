@@ -692,169 +692,343 @@ async function renderDashboard() {
 }
 
 // ════════════════════════════════════════════
-//  SCREEN: OPERARIOS (ADMIN)
+//  SCREEN: OPERARIOS (ADMIN) — ABM COMPLETO
 // ════════════════════════════════════════════
-let diasSelOp = [];
+let _operariosAll = [];
 async function renderOperarios() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Operarios</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
-  const operarios = await fsList('horas_usuarios');
+  _operariosAll = await fsList('horas_usuarios');
 
   c.innerHTML = `
     <div class="section-title">Operarios</div>
-    <div class="section-sub">Gestión de usuarios</div>
-    <button class="btn-primary" style="margin-bottom:16px" onclick="modalNuevoOperario()">+ NUEVO OPERARIO</button>
-    <div class="card-section">
-      <div class="card-section-title">Lista (${operarios.length})</div>
-      ${operarios.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin operarios cargados</div>' :
-        operarios.map(o => `
-          <div class="list-item">
-            <div class="list-item-info">
-              <div class="list-item-name">${o.nombre}</div>
-              <div class="list-item-sub">DNI: ${o.dni} · ${o.rol} · ${o.tipo === 'FIJO' ? `Fijo ${o.horasSemana}hs/sem` : 'Variable'}</div>
-            </div>
-            <div class="list-item-actions">
-              <button class="btn-icon" title="Eliminar" onclick="eliminarOperario('${o._id}','${o.nombre}')">🗑</button>
-            </div>
-          </div>`).join('')
-      }
-    </div>`;
+    <div class="section-sub">Gestión de usuarios del sistema</div>
+    <button class="btn-primary" style="margin-bottom:14px" onclick="modalOperario()">+ NUEVO OPERARIO</button>
+    <input id="op-buscar" placeholder="🔍 Buscar operario o DNI..." oninput="filtrarOperarios()"
+      style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
+    <div id="op-lista"></div>`;
+
+  filtrarOperarios();
 }
 
-function modalNuevoOperario() {
+function filtrarOperarios() {
+  const q = (document.getElementById('op-buscar')?.value || '').toLowerCase();
+  const lista = q ? _operariosAll.filter(o => (o.nombre||'').toLowerCase().includes(q) || String(o.dni||'').includes(q)) : _operariosAll;
+  const cont = document.getElementById('op-lista');
+  if (!cont) return;
+  cont.innerHTML = `<div class="card-section">
+    <div class="card-section-title">Usuarios (${lista.length})</div>
+    ${lista.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin resultados</div>' :
+      lista.map(o => `
+        <div class="list-item">
+          <div class="list-item-info">
+            <div class="list-item-name">${o.nombre||'—'}</div>
+            <div class="list-item-sub">
+              DNI: ${o.dni||'<em style="color:var(--text3)">Sin cargar</em>'}
+              &nbsp;·&nbsp; <span class="pill ${o.rol==='ADMIN'?'pill-blue':o.rol==='SUPERVISOR'?'pill-yellow':'pill-gray'}">${o.rol||'OPERARIO'}</span>
+              &nbsp;·&nbsp; ${o.tipo==='FIJO'?`Fijo ${o.horasSemana||0}hs/sem`:'Variable'}
+              ${!o.password || !o.dni ? '&nbsp;·&nbsp; <span style="color:var(--yellow)">⚠ Incompleto</span>' : ''}
+            </div>
+          </div>
+          <div class="list-item-actions">
+            <button class="btn-icon edit" title="Editar" onclick="modalOperario('${o._id}')">✏️</button>
+            <button class="btn-icon" title="Eliminar" onclick="eliminarOperario('${o._id}','${o.nombre}')">🗑</button>
+          </div>
+        </div>`).join('')
+    }
+  </div>`;
+}
+
+async function modalOperario(id = null) {
+  let o = {};
+  if (id) o = await fsGet('horas_usuarios', id) || {};
+  const esEdicion = !!id;
+
   const m = document.getElementById('modal-container');
   m.innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
       <div class="modal">
-        <div class="modal-title">Nuevo Operario</div>
-        <div class="form-row">
-          <div class="field-sm"><label>Nombre completo</label><input id="op-nombre" placeholder="Ej: Juan Pérez"></div>
-          <div class="field-sm"><label>DNI</label><input id="op-dni" type="number" inputmode="numeric" placeholder="30123456"></div>
+        <div class="modal-title">${esEdicion ? 'Editar Operario' : 'Nuevo Operario'}</div>
+        <div class="field-sm"><label>Nombre completo</label>
+          <input id="op-nombre" placeholder="Ej: García, Juan Carlos" value="${o.nombre||''}">
         </div>
         <div class="form-row">
-          <div class="field-sm"><label>Contraseña</label><input id="op-pass" type="password" placeholder="••••••••"></div>
+          <div class="field-sm"><label>DNI</label>
+            <input id="op-dni" type="number" inputmode="numeric" placeholder="30123456" value="${o.dni||''}">
+          </div>
+          <div class="field-sm"><label>Contraseña</label>
+            <input id="op-pass" type="password" placeholder="${esEdicion?'Dejar vacío para no cambiar':'••••••••'}" value="">
+          </div>
+        </div>
+        <div class="form-row">
           <div class="field-sm"><label>Rol</label>
             <select id="op-rol">
-              <option value="OPERARIO">Operario</option>
-              <option value="SUPERVISOR">Supervisor</option>
-              <option value="ADMIN">Admin</option>
+              <option value="OPERARIO" ${(o.rol||'OPERARIO')==='OPERARIO'?'selected':''}>Operario</option>
+              <option value="SUPERVISOR" ${o.rol==='SUPERVISOR'?'selected':''}>Supervisor</option>
+              <option value="ADMIN" ${o.rol==='ADMIN'?'selected':''}>Admin</option>
+            </select>
+          </div>
+          <div class="field-sm"><label>Tipo liquidación</label>
+            <select id="op-tipo" onchange="toggleHorasFijas()">
+              <option value="VARIABLE" ${(o.tipo||'VARIABLE')==='VARIABLE'?'selected':''}>Variable (horas reales)</option>
+              <option value="FIJO" ${o.tipo==='FIJO'?'selected':''}>Fijo (× 4 semanas)</option>
             </select>
           </div>
         </div>
-        <div class="form-row">
-          <div class="field-sm"><label>Tipo</label>
-            <select id="op-tipo" onchange="toggleHorasFijas()">
-              <option value="VARIABLE">Variable (horas reales)</option>
-              <option value="FIJO">Fijo (× 4 semanas)</option>
-            </select>
-          </div>
-          <div class="field-sm" id="campo-hs-sem" style="display:none">
-            <label>Horas por semana</label><input id="op-hs" type="number" placeholder="Ej: 24">
-          </div>
+        <div class="field-sm" id="campo-hs-sem" style="display:${o.tipo==='FIJO'?'block':'none'}">
+          <label>Horas por semana</label>
+          <input id="op-hs" type="number" step="0.5" placeholder="Ej: 24" value="${o.horasSemana||''}">
         </div>
         <div class="modal-actions">
           <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
-          <button class="btn-primary" onclick="guardarOperario()">GUARDAR</button>
+          <button class="btn-primary" onclick="guardarOperario('${id||''}')">
+            ${esEdicion ? '💾 GUARDAR CAMBIOS' : '✓ CREAR OPERARIO'}
+          </button>
         </div>
       </div>
     </div>`;
 }
 
 function toggleHorasFijas() {
-  const tipo = document.getElementById('op-tipo').value;
-  document.getElementById('campo-hs-sem').style.display = tipo === 'FIJO' ? 'block' : 'none';
+  const tipo = document.getElementById('op-tipo')?.value;
+  const campo = document.getElementById('campo-hs-sem');
+  if (campo) campo.style.display = tipo === 'FIJO' ? 'block' : 'none';
 }
 
-async function guardarOperario() {
+async function guardarOperario(id = '') {
   const nombre = document.getElementById('op-nombre').value.trim();
   const dni = document.getElementById('op-dni').value.trim();
   const pass = document.getElementById('op-pass').value.trim();
   const rol = document.getElementById('op-rol').value;
   const tipo = document.getElementById('op-tipo').value;
-  const hs = document.getElementById('op-hs')?.value || '0';
-  if (!nombre || !dni || !pass) return toast('Completá todos los campos', 'warn');
+  const hs = Number(document.getElementById('op-hs')?.value || 0);
 
-  const id = await fsAdd('horas_usuarios', { nombre, dni, password: pass, rol, tipo, horasSemana: Number(hs), activo: true });
+  if (!nombre) return toast('El nombre es obligatorio', 'warn');
+  if (!id && !pass) return toast('La contraseña es obligatoria para usuarios nuevos', 'warn');
+
+  const data = { nombre, dni, rol, tipo, horasSemana: hs, activo: true };
+  if (pass) data.password = pass;
+
+  if (id) {
+    await fsSave('horas_usuarios', id, data);
+    toast(`✓ ${nombre} actualizado`, 'ok');
+  } else {
+    await fsAdd('horas_usuarios', data);
+    toast(`✓ ${nombre} creado`, 'ok');
+  }
   cerrarModal();
-  toast(`✓ ${nombre} creado`, 'ok');
   renderOperarios();
 }
 
 async function eliminarOperario(id, nombre) {
-  if (!confirm(`¿Eliminar a ${nombre}?`)) return;
+  if (!confirm(`¿Eliminar a ${nombre}?\nEsta acción no se puede deshacer.`)) return;
   await fsDelete('horas_usuarios', id);
+  _operariosAll = _operariosAll.filter(o => o._id !== id);
+  filtrarOperarios();
   toast(`${nombre} eliminado`, 'ok');
-  renderOperarios();
 }
 
 // ════════════════════════════════════════════
-//  SCREEN: SERVICIOS (ADMIN)
+//  SCREEN: SERVICIOS (ADMIN) — ABM COMPLETO
 // ════════════════════════════════════════════
 let diasSelServ = [];
+let _serviciosCache = [];
+let _operariosCache = [];
+
 async function renderServicios() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Servicios</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
   const [servicios, operarios] = await Promise.all([fsList('horas_servicios'), fsList('horas_usuarios')]);
+  _serviciosCache = servicios;
+  _operariosCache = operarios;
+
+  // Supervisores únicos para filtro
+  const supervisores = [...new Set(servicios.map(s => s.supervisor || s.idSupervisor).filter(Boolean))].sort();
 
   c.innerHTML = `
     <div class="section-title">Servicios</div>
-    <div class="section-sub">Clientes y asignaciones</div>
-    <button class="btn-primary" style="margin-bottom:16px" onclick="modalNuevoServicio()">+ NUEVO SERVICIO</button>
-    <div class="card-section">
-      <div class="card-section-title">Servicios (${servicios.length})</div>
-      ${servicios.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin servicios cargados</div>' :
-        servicios.map(s => {
-          const ops = (s.operarios ? (Array.isArray(s.operarios) ? s.operarios : [s.operarios]) : [])
-            .map(id => operarios.find(o => o._id === id)?.nombre || id).join(', ');
-          return `<div class="list-item">
-            <div class="list-item-info">
-              <div class="list-item-name">${s.cliente}</div>
-              <div class="list-item-sub">📍 ${s.direccion} · ${(s.dias||[]).join('-')} · ${s.horaInicio}–${s.horaFin} · ${s.horasContratadas}hs</div>
-              <div class="list-item-sub" style="color:var(--accent)">👷 ${ops || 'Sin asignar'}</div>
-            </div>
-            <div class="list-item-actions">
-              <button class="btn-icon edit" title="Asignar operarios" onclick="modalAsignarOperarios('${s._id}','${s.cliente}')">👷</button>
-              <button class="btn-icon" title="Eliminar" onclick="eliminarServicio('${s._id}','${s.cliente}')">🗑</button>
-            </div>
-          </div>`;
-        }).join('')
-      }
-    </div>`;
+    <div class="section-sub">ABM de objetivos y asignaciones</div>
+    <button class="btn-primary" style="margin-bottom:14px" onclick="modalServicio()">+ NUEVO SERVICIO</button>
+
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <input id="srv-buscar" placeholder="🔍 Buscar cliente..." oninput="filtrarServicios()"
+        style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+      <select id="srv-filtro-sup" onchange="filtrarServicios()"
+        style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos los supervisores</option>
+        ${supervisores.map(s=>`<option value="${s}">${s}</option>`).join('')}
+      </select>
+      <select id="srv-filtro-op" onchange="filtrarServicios()"
+        style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos los operarios</option>
+        ${operarios.filter(o=>o.rol==='OPERARIO').sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(o=>`<option value="${o._id}">${o.nombre}</option>`).join('')}
+      </select>
+    </div>
+
+    <div id="srv-lista"></div>`;
+
+  filtrarServicios();
 }
 
-async function modalNuevoServicio() {
+function filtrarServicios() {
+  const buscar = (document.getElementById('srv-buscar')?.value || '').toLowerCase();
+  const filtroSup = document.getElementById('srv-filtro-sup')?.value || '';
+  const filtroOp = document.getElementById('srv-filtro-op')?.value || '';
+
+  let lista = _serviciosCache;
+  if (buscar) lista = lista.filter(s => (s.cliente||'').toLowerCase().includes(buscar) || (s.codigo||'').includes(buscar) || (s.direccion||'').toLowerCase().includes(buscar));
+  if (filtroSup) lista = lista.filter(s => (s.supervisor||s.idSupervisor||'') === filtroSup);
+  if (filtroOp) lista = lista.filter(s => {
+    const ops = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+    return ops.includes(filtroOp);
+  });
+
+  const cont = document.getElementById('srv-lista');
+  if (!cont) return;
+
+  if (lista.length === 0) {
+    cont.innerHTML = `<div class="card-section"><div style="color:var(--text3);text-align:center;padding:20px">Sin resultados</div></div>`;
+    return;
+  }
+
+  cont.innerHTML = `<div class="card-section">
+    <div class="card-section-title">Mostrando ${lista.length} de ${_serviciosCache.length} servicios</div>
+    ${lista.map(s => {
+      const ops = (Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []))
+        .map(id => _operariosCache.find(o => o._id === id)?.nombre || id).filter(Boolean).join(', ');
+      const supLabel = s.supervisor || (s.idSupervisor ? `Sup. ${s.idSupervisor}` : '');
+      return `<div class="list-item">
+        <div class="list-item-info" style="padding-right:8px">
+          <div class="list-item-name">${s.cliente || '—'} ${s.codigo ? `<span style="color:var(--text3);font-size:11px;font-weight:400">#${s.codigo}</span>` : ''}</div>
+          <div class="list-item-sub">📍 ${s.direccion || '<em style="color:var(--text3)">Sin dirección</em>'}</div>
+          <div class="list-item-sub">
+            ${(s.dias||[]).join(' · ')} &nbsp;·&nbsp; ${s.horaInicio||'--:--'} – ${s.horaFin||'--:--'} &nbsp;·&nbsp; ${s.horasContratadas||0}hs
+            ${supLabel ? `&nbsp;·&nbsp; <span style="color:var(--text3)">🏷 ${supLabel}</span>` : ''}
+          </div>
+          <div class="list-item-sub" style="color:var(--accent)">👷 ${ops || '<em style="color:var(--text3)">Sin asignar</em>'}</div>
+        </div>
+        <div class="list-item-actions" style="flex-shrink:0">
+          <button class="btn-icon edit" title="Editar" onclick="modalServicio('${s._id}')">✏️</button>
+          <button class="btn-icon" title="Eliminar" onclick="eliminarServicio('${s._id}','${s.cliente}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ── MODAL UNIFICADO ALTA / EDICIÓN ──
+async function modalServicio(id = null) {
   diasSelServ = [];
   const operarios = await fsList('horas_usuarios');
-  const opsOpts = operarios.filter(o => o.rol === 'OPERARIO').map(o => `<option value="${o._id}">${o.nombre} (DNI: ${o.dni})</option>`).join('');
+  let s = {};
+  if (id) {
+    s = await fsGet('horas_servicios', id);
+    diasSelServ = Array.isArray(s.dias) ? [...s.dias] : [];
+  }
+
+  const esEdicion = !!id;
+  const opsIds = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+
+  // Lista de operarios con buscador interno
+  const opsList = operarios
+    .filter(o => o.rol === 'OPERARIO')
+    .sort((a,b) => a.nombre.localeCompare(b.nombre));
 
   const m = document.getElementById('modal-container');
   m.innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
       <div class="modal">
-        <div class="modal-title">Nuevo Servicio</div>
-        <div class="field-sm"><label>Cliente / Consorcio</label><input id="sv-cliente" placeholder="Ej: Edificio Los Arcos"></div>
-        <div class="field-sm"><label>Dirección</label><input id="sv-dir" placeholder="Ej: Av. Colón 1234, Córdoba"></div>
+        <div class="modal-title">${esEdicion ? 'Editar Servicio' : 'Nuevo Servicio'}</div>
+
         <div class="form-row">
-          <div class="field-sm"><label>Hora inicio</label><input id="sv-inicio" type="time"></div>
-          <div class="field-sm"><label>Hora fin</label><input id="sv-fin" type="time"></div>
+          <div class="field-sm">
+            <label>Código objetivo</label>
+            <input id="sv-codigo" placeholder="Ej: 0000895" value="${s.codigo||''}">
+          </div>
+          <div class="field-sm">
+            <label>ID Supervisor</label>
+            <input id="sv-idsup" placeholder="Ej: 007" value="${s.idSupervisor||''}">
+          </div>
         </div>
-        <div class="field-sm"><label>Horas contratadas</label><input id="sv-hs" type="number" step="0.5" placeholder="Ej: 2"></div>
+
+        <div class="field-sm">
+          <label>Nombre del cliente / objetivo</label>
+          <input id="sv-cliente" placeholder="Ej: Edificio Los Arcos" value="${s.cliente||''}">
+        </div>
+
+        <div class="field-sm">
+          <label>Dirección</label>
+          <input id="sv-dir" placeholder="Ej: Av. Colón 1234, Córdoba" value="${s.direccion||''}">
+        </div>
+
+        <div class="field-sm">
+          <label>Supervisor (nombre)</label>
+          <input id="sv-sup" placeholder="Ej: SUPERVISION CENTRICA" value="${s.supervisor||''}">
+        </div>
+
         <div class="field-sm">
           <label>Días de trabajo</label>
           <div class="dias-check" id="dias-check">
-            ${DIAS_SEMANA.map((d,i) => `<button class="dia-btn" id="dia-${d}" onclick="toggleDia('${d}')">${d}</button>`).join('')}
+            ${DIAS_SEMANA.map(d => `<button class="dia-btn ${diasSelServ.includes(d)?'sel':''}" id="dia-${d}" onclick="toggleDia('${d}')">${d}</button>`).join('')}
           </div>
         </div>
-        <div class="field-sm"><label>Asignar operarios</label>
-          <select id="sv-ops" multiple style="height:90px">${opsOpts}</select>
-          <div style="font-size:11px;color:var(--text3);margin-top:4px">Mantené Ctrl/Cmd para seleccionar varios</div>
+
+        <div class="form-row">
+          <div class="field-sm">
+            <label>Hora inicio</label>
+            <input id="sv-inicio" type="time" value="${s.horaInicio||''}">
+          </div>
+          <div class="field-sm">
+            <label>Hora fin</label>
+            <input id="sv-fin" type="time" value="${s.horaFin||''}">
+          </div>
         </div>
+
+        <div class="form-row">
+          <div class="field-sm">
+            <label>Horas contratadas / jornada</label>
+            <input id="sv-hs" type="number" step="0.5" placeholder="Ej: 2" value="${s.horasContratadas||''}">
+          </div>
+          <div class="field-sm">
+            <label>Radio GPS tolerancia (m)</label>
+            <input id="sv-radio" type="number" placeholder="300" value="${s.radioGps||300}">
+          </div>
+        </div>
+
+        <div class="field-sm">
+          <label>Asignar operarios</label>
+          <input id="sv-op-buscar" placeholder="🔍 Filtrar operario..." oninput="filtrarOpsModal()"
+            style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none;margin-bottom:6px">
+          <div id="sv-ops-lista" style="max-height:180px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 0">
+            ${opsList.map(o => `
+              <div class="list-item" style="padding:7px 12px" id="op-row-${o._id}">
+                <div class="list-item-info">
+                  <div style="font-size:14px;font-weight:500">${o.nombre}</div>
+                  <div style="font-size:11px;color:var(--text3)">DNI: ${o.dni||'—'}</div>
+                </div>
+                <input type="checkbox" id="chk-${o._id}" ${opsIds.includes(o._id)?'checked':''}
+                  style="width:20px;height:20px;accent-color:var(--accent);flex-shrink:0">
+              </div>`).join('')}
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">Podés seleccionar varios operarios</div>
+        </div>
+
         <div class="modal-actions">
           <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
-          <button class="btn-primary" onclick="guardarServicio()">GUARDAR</button>
+          <button class="btn-primary" onclick="guardarServicio('${id||''}')">
+            ${esEdicion ? '💾 GUARDAR CAMBIOS' : '✓ CREAR SERVICIO'}
+          </button>
         </div>
       </div>
     </div>`;
+}
+
+function filtrarOpsModal() {
+  const q = (document.getElementById('sv-op-buscar')?.value || '').toLowerCase();
+  document.querySelectorAll('[id^="op-row-"]').forEach(row => {
+    const nombre = row.querySelector('div[style*="font-weight"]')?.textContent?.toLowerCase() || '';
+    row.style.display = nombre.includes(q) ? '' : 'none';
+  });
 }
 
 function toggleDia(dia) {
@@ -868,56 +1042,48 @@ function toggleDia(dia) {
   }
 }
 
-async function guardarServicio() {
+async function guardarServicio(id = '') {
   const cliente = document.getElementById('sv-cliente').value.trim();
   const direccion = document.getElementById('sv-dir').value.trim();
+  const codigo = document.getElementById('sv-codigo').value.trim();
+  const idSupervisor = document.getElementById('sv-idsup').value.trim();
+  const supervisor = document.getElementById('sv-sup').value.trim();
   const horaInicio = document.getElementById('sv-inicio').value;
   const horaFin = document.getElementById('sv-fin').value;
-  const horasContratadas = Number(document.getElementById('sv-hs').value);
-  const opsSelect = document.getElementById('sv-ops');
-  const operarios = Array.from(opsSelect.selectedOptions).map(o => o.value);
+  const horasContratadas = Number(document.getElementById('sv-hs').value) || 0;
+  const radioGps = Number(document.getElementById('sv-radio').value) || 300;
+  const operariosSelec = Array.from(document.querySelectorAll('[id^="chk-"]')).filter(c=>c.checked).map(c=>c.id.replace('chk-',''));
 
-  if (!cliente || !direccion || diasSelServ.length === 0) return toast('Completá cliente, dirección y días', 'warn');
+  if (!cliente) return toast('El nombre del cliente es obligatorio', 'warn');
+  if (diasSelServ.length === 0) return toast('Seleccioná al menos un día', 'warn');
 
-  await fsAdd('horas_servicios', {
-    cliente, direccion, horaInicio, horaFin, horasContratadas,
-    dias: diasSelServ, operarios, radioGps: 300, lat: '', lon: ''
-  });
+  const data = {
+    cliente, direccion, codigo, idSupervisor, supervisor,
+    horaInicio, horaFin, horasContratadas, radioGps,
+    dias: diasSelServ,
+    operarios: operariosSelec,
+    tipo: 'FIJO',
+    lat: '', lon: ''
+  };
+
+  if (id) {
+    await fsSave('horas_servicios', id, data);
+    toast(`✓ ${cliente} actualizado`, 'ok');
+  } else {
+    await fsAdd('horas_servicios', data);
+    toast(`✓ ${cliente} creado`, 'ok');
+  }
+
   cerrarModal();
-  toast(`✓ Servicio ${cliente} creado`, 'ok');
   renderServicios();
 }
 
-async function modalAsignarOperarios(servicioId, clienteNombre) {
-  const [servicio, operarios] = await Promise.all([fsGet('horas_servicios', servicioId), fsList('horas_usuarios')]);
-  const asignados = servicio?.operarios || [];
-
-  const m = document.getElementById('modal-container');
-  m.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
-      <div class="modal">
-        <div class="modal-title">Asignar Operarios</div>
-        <div class="section-sub" style="margin-bottom:14px">${clienteNombre}</div>
-        ${operarios.filter(o=>o.rol==='OPERARIO').map(o => `
-          <div class="list-item" style="padding:8px 0">
-            <div class="list-item-info"><div class="list-item-name">${o.nombre}</div><div class="list-item-sub">DNI: ${o.dni}</div></div>
-            <input type="checkbox" id="chk-${o._id}" ${asignados.includes(o._id)?'checked':''} style="width:20px;height:20px;accent-color:var(--accent)">
-          </div>`).join('')}
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
-          <button class="btn-primary" onclick="guardarAsignacion('${servicioId}')">GUARDAR</button>
-        </div>
-      </div>
-    </div>`;
-}
-
-async function guardarAsignacion(servicioId) {
-  const checkboxes = document.querySelectorAll('[id^="chk-"]');
-  const seleccionados = Array.from(checkboxes).filter(c => c.checked).map(c => c.id.replace('chk-', ''));
-  await fsSave('horas_servicios', servicioId, { operarios: seleccionados });
-  cerrarModal();
-  toast('✓ Asignación guardada', 'ok');
-  renderServicios();
+async function eliminarServicio(id, nombre) {
+  if (!confirm(`¿Eliminar el servicio "${nombre}"?\nEsta acción no se puede deshacer.`)) return;
+  await fsDelete('horas_servicios', id);
+  _serviciosCache = _serviciosCache.filter(s => s._id !== id);
+  filtrarServicios();
+  toast(`${nombre} eliminado`, 'ok');
 }
 
 async function eliminarServicio(id, nombre) {
