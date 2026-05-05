@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MegaClean · Importar Horas de Recibo</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI',sans-serif; background:#f4f7fa; color:#1a2533; padding:24px; }
+  h1 { color:#1a8fcb; font-size:22px; margin-bottom:4px; letter-spacing:1px; }
+  .sub { color:#7a8899; font-size:13px; margin-bottom:28px; }
+  .card { background:#fff; border:1.5px solid #dce3ed; border-radius:14px; padding:22px; margin-bottom:18px; max-width:620px; box-shadow:0 2px 12px rgba(26,143,203,.08); }
+  .card h2 { font-size:13px; color:#7a8899; letter-spacing:1px; text-transform:uppercase; margin-bottom:14px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .stat { font-size:42px; font-weight:900; color:#1a8fcb; }
+  .stat-label { font-size:11px; color:#8fa3b8; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
+  .btn { background:linear-gradient(135deg,#1a8fcb,#0e6fa0); color:#fff; border:none; border-radius:10px; padding:14px 28px; font-size:16px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; cursor:pointer; width:100%; max-width:620px; display:block; margin-bottom:12px; box-shadow:0 4px 14px rgba(26,143,203,.25); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .progress { background:#dce3ed; border-radius:4px; height:6px; max-width:620px; margin-bottom:14px; overflow:hidden; }
+  .progress-bar { height:100%; background:#1a8fcb; transition:width .25s; width:0%; border-radius:4px; }
+  .log { background:#1a2533; border-radius:10px; padding:16px; height:280px; overflow-y:auto; font-family:monospace; font-size:12px; max-width:620px; }
+  .ok { color:#27a85a; } .err { color:#d63d4a; } .info { color:#1a8fcb; } .warn { color:#e07b2a; }
+</style>
+</head>
+<body>
+<h1>MEGACLEAN · HORAS DE RECIBO</h1>
+<div class="sub">Actualiza legajo y horas de recibo en perfiles de operarios</div>
+
+<div class="card">
+  <h2>Datos del archivo</h2>
+  <div class="grid">
+    <div><div class="stat">164</div><div class="stat-label">Operarios</div></div>
+    <div><div class="stat" id="stat-ok">—</div><div class="stat-label">Actualizados</div></div>
+    <div><div class="stat" id="stat-nm">—</div><div class="stat-label">Sin match</div></div>
+  </div>
+</div>
+
+<div class="progress"><div class="progress-bar" id="pb"></div></div>
+<button class="btn" id="btn" onclick="run()">▶ IMPORTAR HORAS DE RECIBO</button>
+<div class="log" id="log"></div>
+
+<script>
+const FB = 'mega-clean-12f17';
+const API = 'https://firestore.googleapis.com/v1/projects/' + FB + '/databases/(default)/documents';
+const DATA = [{"legajo": "00064", "nombre": "ACOSTA, LORENA MACARENA", "horasRecibo": 160}, {"legajo": "00238", "nombre": "ACUÑA, MARIELA JUDY", "horasRecibo": 136}, {"legajo": "01216", "nombre": "AGUIRRE, FIAMA CELESTE", "horasRecibo": 122}, {"legajo": "00747", "nombre": "AGUIRRE, YAMILA SOLEDAD", "horasRecibo": 132}, {"legajo": "00733", "nombre": "ALANIE, MONICA DANIELA", "horasRecibo": 108}, {"legajo": "00128", "nombre": "ALDERETE, VANESA ALEJANDRA", "horasRecibo": 176}, {"legajo": "00044", "nombre": "ALI, ROBERTO CARLOS", "horasRecibo": 176}, {"legajo": "00484", "nombre": "ALTAMIRANO RUEDA, GABRIEL ALEJANDRO", "horasRecibo": 176}, {"legajo": "00474", "nombre": "ANDRADA, GASTON DARIO", "horasRecibo": 160}, {"legajo": "00269", "nombre": "ARIAS, ERIKA ELENA GISELLE", "horasRecibo": 140}, {"legajo": "01030", "nombre": "ARIAS, LAUTARO FABRIZIO", "horasRecibo": 176}, {"legajo": "00074", "nombre": "ARMESTO, ASTRID NOEMI", "horasRecibo": 136}, {"legajo": "01059", "nombre": "ARROYO, LAURA SOLEDAD", "horasRecibo": 176}, {"legajo": "00843", "nombre": "ARTAZA, VANESA BELEN", "horasRecibo": 120}, {"legajo": "00420", "nombre": "BAIGORRIA, LAURA SOLEDAD", "horasRecibo": 160}, {"legajo": "01236", "nombre": "BARBOSA, ALEXIS EZEQUIEL", "horasRecibo": 176}, {"legajo": "01078", "nombre": "BARRAZA, JANET YAMILA", "horasRecibo": 176}, {"legajo": "00213", "nombre": "BARRERA, YANINA YOHANA", "horasRecibo": 116}, {"legajo": "00883", "nombre": "BARRIONUEVO, GRISELDA NOELIA", "horasRecibo": 176}, {"legajo": "01057", "nombre": "BASTIAS, GERARDO EXEQUIEL", "horasRecibo": 80}, {"legajo": "00872", "nombre": "BASTIDAS HERNANDEZ, YESSICA ANDREINA", "horasRecibo": 160}, {"legajo": "01185", "nombre": "BIASUTTI, MELISA DANIELA", "horasRecibo": 152}, {"legajo": "00548", "nombre": "BRACAMONTE, ESTEBAN RAFAEL", "horasRecibo": 176}, {"legajo": "00078", "nombre": "BUSTOS, PATRICIA ALEJANDRA", "horasRecibo": 176}, {"legajo": "00175", "nombre": "CABELLO, PATRICIA ANDREA", "horasRecibo": 148}, {"legajo": "00479", "nombre": "CABRERA, YOHANA DE LOURDES", "horasRecibo": 176}, {"legajo": "01212", "nombre": "CAMPOS, BRUNO JULIAN", "horasRecibo": 126}, {"legajo": "00107", "nombre": "CAPDEVILA, NANCY BEATRIZ", "horasRecibo": 160}, {"legajo": "00060", "nombre": "CARABAJAL, ANDREA FABIANA", "horasRecibo": 176}, {"legajo": "00543", "nombre": "CARO, NESTOR VICTOR HUGO", "horasRecibo": 176}, {"legajo": "01278", "nombre": "CARRIZO, CELESTE CATERIN", "horasRecibo": 100}, {"legajo": "00120", "nombre": "CARRIZO, ESTELA EDITH", "horasRecibo": 152}, {"legajo": "01171", "nombre": "CASTILLO, CELESTE ALEJANDRA", "horasRecibo": 100}, {"legajo": "01245", "nombre": "CASTILLO, YAMILA IVANA", "horasRecibo": 152}, {"legajo": "00544", "nombre": "CASTRO, JAVIER ENRIQUE", "horasRecibo": 176}, {"legajo": "01060", "nombre": "CASTRO, LAURA MARIELA", "horasRecibo": 100}, {"legajo": "00201", "nombre": "CATALA, VERONICA LORENA", "horasRecibo": 160}, {"legajo": "00879", "nombre": "CEBALLOS, ANACLARA", "horasRecibo": 146}, {"legajo": "00224", "nombre": "CEPEDA, ALDANA DEL MILAGRO", "horasRecibo": 104}, {"legajo": "01048", "nombre": "CHAVARRIA MARCELO, DAVID EMANUEL", "horasRecibo": 80}, {"legajo": "00690", "nombre": "CHAVERO, MARIA EUGENIA", "horasRecibo": 100}, {"legajo": "01226", "nombre": "COLIN LESCANO, TERESA BEATRIZ", "horasRecibo": 160}, {"legajo": "01032", "nombre": "COMOLLO, PAULA VALERIA", "horasRecibo": 176}, {"legajo": "00902", "nombre": "CONTINI, MARIA BELEN", "horasRecibo": 176}, {"legajo": "00878", "nombre": "CORDOBA, JACQUELINE", "horasRecibo": 176}, {"legajo": "01008", "nombre": "CORTEZ, GUILLERMO KEVIN", "horasRecibo": 176}, {"legajo": "01268", "nombre": "CORTEZ, ROSA DEL VALLE", "horasRecibo": 100}, {"legajo": "00081", "nombre": "CRIADO, ROSANA ESTHER", "horasRecibo": 176}, {"legajo": "00633", "nombre": "DAGATTI, CECILIA ESTER", "horasRecibo": 176}, {"legajo": "01277", "nombre": "DAVILA, DANIELA DE LOURDES", "horasRecibo": 100}, {"legajo": "01290", "nombre": "DAVILA, SUSANA MARISEL", "horasRecibo": 100}, {"legajo": "00126", "nombre": "DE ARRASCAETA, SILVANA ADELA", "horasRecibo": 176}, {"legajo": "00975", "nombre": "DELGADO, LUIS ALBERTO", "horasRecibo": 176}, {"legajo": "01251", "nombre": "DI PAULA, INDIRA KARIN", "horasRecibo": 176}, {"legajo": "00079", "nombre": "DIAZ, LOURDES YANINA", "horasRecibo": 104}, {"legajo": "00116", "nombre": "DIAZ, MONICA ALEJANDRA", "horasRecibo": 128}, {"legajo": "01109", "nombre": "DOMINGUEZ, MARIA VANESA", "horasRecibo": 160}, {"legajo": "01266", "nombre": "DULCE, ROCIO AYELEN", "horasRecibo": 100}, {"legajo": "00407", "nombre": "ETCHEGARAY, PATRICIA VERONICA", "horasRecibo": 96}, {"legajo": "00723", "nombre": "FERNANDEZ, CECILIA NOELIA", "horasRecibo": 176}, {"legajo": "00308", "nombre": "FERNANDEZ, CRISTINA OFELIA", "horasRecibo": 176}, {"legajo": "00327", "nombre": "FERREYRA, FRANCO GABRIEL", "horasRecibo": 176}, {"legajo": "00536", "nombre": "FIGUEROA, FERNANDA SOLEDAD", "horasRecibo": 88}, {"legajo": "01260", "nombre": "FONTANA, CINTIA ROMINA", "horasRecibo": 176}, {"legajo": "01010", "nombre": "GARAY, ANGEL EZEQUIEL", "horasRecibo": 176}, {"legajo": "01254", "nombre": "GERZEY, LUDMILA", "horasRecibo": 176}, {"legajo": "00936", "nombre": "GODOY, EMA IRENE", "horasRecibo": 148}, {"legajo": "00203", "nombre": "GODOY, SILVANA ALEJANDRA", "horasRecibo": 128}, {"legajo": "00994", "nombre": "GOMEZ TERRON, JESICA FERNANDA", "horasRecibo": 80}, {"legajo": "00745", "nombre": "GONZALEZ, LORENA MARIELA", "horasRecibo": 172}, {"legajo": "01275", "nombre": "GORDILLO, ALBERTO EMANUEL", "horasRecibo": 176}, {"legajo": "01004", "nombre": "GUDIÑO TULA, SANDRA GRACIELA", "horasRecibo": 160}, {"legajo": "00041", "nombre": "GUERRERO, ANDREA FABIANA", "horasRecibo": 152}, {"legajo": "01128", "nombre": "GUEVARA, VILMA VERONICA", "horasRecibo": 176}, {"legajo": "01096", "nombre": "GUTIERREZ VEGA, FIDELIA", "horasRecibo": 76}, {"legajo": "00396", "nombre": "HEREDIA, MARIA CELESTE", "horasRecibo": 148}, {"legajo": "01092", "nombre": "IBARRA, FABRIZIO ALAN IVAN", "horasRecibo": 176}, {"legajo": "00661", "nombre": "IGLESIAS, YANINA SOLEDAD", "horasRecibo": 160}, {"legajo": "01249", "nombre": "JAIME, SERGIO AGUSTIN", "horasRecibo": 176}, {"legajo": "01271", "nombre": "JUNCOS SOLIZ, SOFIA VALENTINA", "horasRecibo": 100}, {"legajo": "01207", "nombre": "LEDESMA, GISELA CAROLINA", "horasRecibo": 176}, {"legajo": "00862", "nombre": "LEDESMAS, LOURDES NOELIA", "horasRecibo": 176}, {"legajo": "01209", "nombre": "LEDEZMA, MARIA SUSANA", "horasRecibo": 100}, {"legajo": "00951", "nombre": "LENCINA, CARINA EUGENIA", "horasRecibo": 130}, {"legajo": "01210", "nombre": "LIVIERO, RICARDO MATIAS", "horasRecibo": 176}, {"legajo": "01041", "nombre": "LOPEZ, ADRIAN EDUARDO", "horasRecibo": 176}, {"legajo": "00602", "nombre": "LUDUEÑA, JUAN JOSE", "horasRecibo": 176}, {"legajo": "01284", "nombre": "LUNA, ANA MARCELA", "horasRecibo": 100}, {"legajo": "01289", "nombre": "LUNA, KARINA DEL VALLE", "horasRecibo": 100}, {"legajo": "01282", "nombre": "MANSILLA, LOURDES YAMILA", "horasRecibo": 100}, {"legajo": "01257", "nombre": "MARESTI, ANAHI", "horasRecibo": 100}, {"legajo": "00565", "nombre": "MICUDA, JIMENA NATALÍ", "horasRecibo": 176}, {"legajo": "01197", "nombre": "MOLINA, CYNTHIA CAREN", "horasRecibo": 176}, {"legajo": "00042", "nombre": "MOLINA, DANIEL AMERICO", "horasRecibo": 176}, {"legajo": "01141", "nombre": "MOLINA, RAMONA ALEJANDRA", "horasRecibo": 144}, {"legajo": "00547", "nombre": "MONTELLANOS, GUSTAVO RAUL", "horasRecibo": 176}, {"legajo": "01151", "nombre": "MORALES, YANINA SOLEDAD DEL CARMEN", "horasRecibo": 176}, {"legajo": "00130", "nombre": "MORENO, MARIA CRISTINA", "horasRecibo": 104}, {"legajo": "01204", "nombre": "MOYANO, ADRIANA PAOLA", "horasRecibo": 176}, {"legajo": "00139", "nombre": "MOYANO, MARIANA SOLEDAD", "horasRecibo": 176}, {"legajo": "01217", "nombre": "MURUA, CRISTIAN ISMAEL", "horasRecibo": 176}, {"legajo": "00758", "nombre": "NARVAJA, ANDRES ROBERTO CARLOS", "horasRecibo": 176}, {"legajo": "01227", "nombre": "NAZZETTA, ANTONELLA", "horasRecibo": 156}, {"legajo": "00892", "nombre": "NIETO, ALICIA DEL CARMEN", "horasRecibo": 144}, {"legajo": "00304", "nombre": "NIVOLI, MARIA PAOLA", "horasRecibo": 176}, {"legajo": "01218", "nombre": "OLIVA, CLAUDIO JOEL", "horasRecibo": 176}, {"legajo": "00752", "nombre": "OLIVA, VALERIA DEL CARMEN", "horasRecibo": 168}, {"legajo": "01167", "nombre": "OLMEDO, MARIA DE LOS ANGELES", "horasRecibo": 100}, {"legajo": "00834", "nombre": "OLMEDO, SILVANA", "horasRecibo": 176}, {"legajo": "01091", "nombre": "ONTIVERO, JUAN PABLO", "horasRecibo": 176}, {"legajo": "00243", "nombre": "ORTEGA, JULIO CESAR", "horasRecibo": 80}, {"legajo": "00967", "nombre": "OVIEDO, LAURA MARCELA", "horasRecibo": 148}, {"legajo": "00513", "nombre": "OVIEDO, MARIA VICTORIA", "horasRecibo": 156}, {"legajo": "01062", "nombre": "OVIEDO, MARIELA SOLEDAD", "horasRecibo": 124}, {"legajo": "00461", "nombre": "PAEZ, ROXANA KARINA", "horasRecibo": 138}, {"legajo": "00043", "nombre": "PALACIOS, GABRIELA FERNANDA", "horasRecibo": 136}, {"legajo": "01279", "nombre": "PALACIOS, JAQUELINA DE LOS ANGELES", "horasRecibo": 100}, {"legajo": "01258", "nombre": "PERALTA, JESICA ELIZABETH", "horasRecibo": 100}, {"legajo": "00295", "nombre": "PERALTA, MARIANA DE LOS ANGELES", "horasRecibo": 110}, {"legajo": "00619", "nombre": "PEREYRA, NADIA ROMINA", "horasRecibo": 120}, {"legajo": "01286", "nombre": "PEREYRA, OFELIA VIVIANA", "horasRecibo": 100}, {"legajo": "01285", "nombre": "PEREZ, GUADALUPE MACARENA", "horasRecibo": 100}, {"legajo": "00881", "nombre": "PEREZ, WALTER GUILLERMO", "horasRecibo": 176}, {"legajo": "01269", "nombre": "PIZARRO, SILVANA LORENA", "horasRecibo": 100}, {"legajo": "00995", "nombre": "PREGOT, ROCIO BELEN", "horasRecibo": 176}, {"legajo": "01280", "nombre": "PUCHETA, ROMINA PAOLA DEL VALLE", "horasRecibo": 100}, {"legajo": "00708", "nombre": "QUINTANA, JOSE LUIS", "horasRecibo": 176}, {"legajo": "00495", "nombre": "RAMOS, SUSANA MARIANA", "horasRecibo": 160}, {"legajo": "00807", "nombre": "RIOS, ERICA PATRICIA", "horasRecibo": 140}, {"legajo": "00999", "nombre": "ROBLEDO, GONZALO DAVID", "horasRecibo": 176}, {"legajo": "00923", "nombre": "ROBLEDO, MARIA SOLEDAD", "horasRecibo": 176}, {"legajo": "00702", "nombre": "ROBLEDO, MARIA VICTORIA", "horasRecibo": 176}, {"legajo": "01178", "nombre": "ROBLEDO ROMERO, CRISTIAN ROMAN", "horasRecibo": 176}, {"legajo": "00851", "nombre": "RODRIGUEZ, NOELIA AYELEN", "horasRecibo": 144}, {"legajo": "01064", "nombre": "ROJAS, EVELIN CELESTE", "horasRecibo": 168}, {"legajo": "01127", "nombre": "ROLDAN, DANIELA RUTH", "horasRecibo": 170}, {"legajo": "01131", "nombre": "ROLDAN, FLORENCIA ELIANA", "horasRecibo": 176}, {"legajo": "00089", "nombre": "ROMANO, ROXANA ELIZABETH", "horasRecibo": 156}, {"legajo": "00009", "nombre": "ROMERO, JUAN JOSE", "horasRecibo": 152}, {"legajo": "00725", "nombre": "ROMOLI, MARIELA ALEJANDRA", "horasRecibo": 100}, {"legajo": "00545", "nombre": "SALAS, ALEJANDRO LUJAN", "horasRecibo": 176}, {"legajo": "00512", "nombre": "SALAS, PEDRO GUSTAVO", "horasRecibo": 176}, {"legajo": "01168", "nombre": "SALGUERO, MARISA ANDREA", "horasRecibo": 80}, {"legajo": "00101", "nombre": "SANCHEZ, CARLA NATALIA", "horasRecibo": 120}, {"legajo": "00314", "nombre": "SARRIA, LUCIANA YUDITH", "horasRecibo": 156}, {"legajo": "00441", "nombre": "SERRANO, JESSICA MARIANA", "horasRecibo": 80}, {"legajo": "01243", "nombre": "SIACCA, CLAUDIA ALEJANDRA", "horasRecibo": 160}, {"legajo": "01040", "nombre": "SILVA, NANCY ROXANA", "horasRecibo": 120}, {"legajo": "00714", "nombre": "SILVA, RAQUEL JULIA", "horasRecibo": 80}, {"legajo": "01259", "nombre": "SOLIZ, JOSE GABRIEL", "horasRecibo": 176}, {"legajo": "00904", "nombre": "SORIA, CAROLINA NATALIA", "horasRecibo": 168}, {"legajo": "00856", "nombre": "SOSA, MARIA ALEJANDRA", "horasRecibo": 156}, {"legajo": "00093", "nombre": "SOSA, MARIA DOLORES", "horasRecibo": 112}, {"legajo": "01274", "nombre": "SOSA, NATALIA ROMINA", "horasRecibo": 100}, {"legajo": "00956", "nombre": "TAMANTINI, SILVINA SOLEDAD", "horasRecibo": 176}, {"legajo": "00788", "nombre": "TOLEDO, BLANCA ISABEL", "horasRecibo": 168}, {"legajo": "00580", "nombre": "TORRES, FERNANDO DAVID", "horasRecibo": 160}, {"legajo": "00282", "nombre": "TRIMARCHI, CARLOS AGUSTIN", "horasRecibo": 176}, {"legajo": "00163", "nombre": "VASQUEZ, YANINA ELIZABETH", "horasRecibo": 100}, {"legajo": "01272", "nombre": "VERA, CINTIA GISEL", "horasRecibo": 100}, {"legajo": "00796", "nombre": "VILLAVERDE MONTENEGRO, LAURA DANIELA", "horasRecibo": 176}, {"legajo": "00500", "nombre": "YEDRO, SANDRA EDITH", "horasRecibo": 176}, {"legajo": "01089", "nombre": "ZAMORA, CRISTINA DEL VALLE", "horasRecibo": 156}, {"legajo": "00546", "nombre": "ZOHIL, DIEGO HERMINIO", "horasRecibo": 176}];
+
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = type; d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function pb(pct) { document.getElementById('pb').style.width = pct + '%'; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function normNombre(n) {
+  return n.toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^A-Z0-9\s,]/g,'').trim();
+}
+
+function toFS(data) {
+  const fields = {};
+  for (const [k,v] of Object.entries(data)) {
+    if (typeof v === 'string') fields[k] = {stringValue: v};
+    else if (typeof v === 'number') fields[k] = {integerValue: String(v)};
+    else if (typeof v === 'boolean') fields[k] = {booleanValue: v};
+  }
+  return {fields};
+}
+
+async function run() {
+  document.getElementById('btn').disabled = true;
+  log('Leyendo operarios de Firebase...', 'info');
+
+  const r = await fetch(API + '/horas_usuarios?pageSize=300');
+  const d = await r.json();
+  if (!d.documents) { log('Sin operarios en Firebase', 'err'); return; }
+
+  log('Operarios en Firebase: ' + d.documents.length, 'info');
+
+  let ok = 0, noMatch = 0, errors = 0;
+  const total = DATA.length;
+
+  for (let i = 0; i < DATA.length; i++) {
+    const rec = DATA[i];
+    const recNorm = normNombre(rec.nombre);
+
+    // Buscar por nombre normalizado
+    const doc = d.documents.find(doc => {
+      const nombre = doc.fields?.nombre?.stringValue || '';
+      return normNombre(nombre) === recNorm;
+    });
+
+    if (!doc) {
+      noMatch++;
+      if (noMatch <= 10) log('Sin match: ' + rec.nombre, 'warn');
+      pb((i+1)/total*100);
+      continue;
+    }
+
+    const docId = doc.name.split('/').pop();
+    const mask = 'updateMask.fieldPaths=legajo&updateMask.fieldPaths=horasRecibo';
+    const res = await fetch(API + '/horas_usuarios/' + docId + '?' + mask, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(toFS({ legajo: rec.legajo, horasRecibo: rec.horasRecibo }))
+    });
+
+    if (res.ok) { ok++; }
+    else { errors++; log('Error actualizando: ' + rec.nombre, 'err'); }
+
+    if ((i+1) % 20 === 0 || i === total-1) {
+      log('Procesados: ' + (i+1) + '/' + total + ' · OK: ' + ok + ' · Sin match: ' + noMatch, 'ok');
+      pb((i+1)/total*100);
+      await sleep(80);
+    }
+  }
+
+  document.getElementById('stat-ok').textContent = ok;
+  document.getElementById('stat-nm').textContent = noMatch;
+
+  log('', 'info');
+  log('✅ IMPORTACIÓN COMPLETA', 'ok');
+  log('Actualizados: ' + ok + ' · Sin match: ' + noMatch + ' · Errores: ' + errors, 'info');
+  if (noMatch > 0) log('Los sin match pueden tener pequeñas diferencias de nombre. Revisá manualmente.', 'warn');
+  pb(100);
+  document.getElementById('btn').textContent = '✓ COMPLETADO';
+}
+</script>
+</body>
+</html>
