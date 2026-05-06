@@ -15,14 +15,29 @@ body { font-family: Arial; background:#f4f7fa; }
 .estado { padding:5px; border-radius:5px; font-size:12px; display:inline-block; }
 .activo { background:#27a85a; color:#fff; }
 .inactivo { background:#999; color:#fff; }
+.login-box { background:#fff; padding:20px; border-radius:10px; text-align:center; }
+input { padding:10px; width:100%; margin-top:10px; }
 </style>
 </head>
 
 <body>
 
 <div class="container">
-  <h2>Gestión de Horas</h2>
-  <div id="servicios">Cargando...</div>
+
+  <div id="login">
+    <div class="login-box">
+      <h2>Ingreso Operario</h2>
+      <input type="text" id="usuario" placeholder="Apellido (ej: carabajal)">
+      <button class="btn btn-entrar" onclick="login()">Ingresar</button>
+    </div>
+  </div>
+
+  <div id="app" style="display:none;">
+    <h2>Gestión de Horas</h2>
+    <button onclick="logout()">Cerrar sesión</button>
+    <div id="servicios">Cargando...</div>
+  </div>
+
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
@@ -39,10 +54,37 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// 🔥 CAMBIÁ ESTO PARA PROBAR OTRO OPERARIO
-const OPERARIO_ACTUAL = "carabajal";
-
+let OPERARIO_ACTUAL = null;
 let estadoOperario = {};
+
+// ================= LOGIN =================
+function login() {
+  const user = document.getElementById("usuario").value.toLowerCase().trim();
+
+  if (!user) {
+    alert("Ingresá tu apellido");
+    return;
+  }
+
+  localStorage.setItem("operario", user);
+  iniciarApp();
+}
+
+function logout() {
+  localStorage.removeItem("operario");
+  location.reload();
+}
+
+function iniciarApp() {
+  OPERARIO_ACTUAL = localStorage.getItem("operario");
+
+  if (!OPERARIO_ACTUAL) return;
+
+  document.getElementById("login").style.display = "none";
+  document.getElementById("app").style.display = "block";
+
+  cargarServicios();
+}
 
 // ================= DÍA =================
 function obtenerDia() {
@@ -62,10 +104,8 @@ async function cargarServicios() {
   snapshot.forEach(doc => {
     const data = doc.data();
 
-    // 🔥 FILTRO OPERARIO (CLAVE)
-    if (!doc.id.toLowerCase().includes(OPERARIO_ACTUAL.toLowerCase())) return;
+    if (!doc.id.toLowerCase().includes(OPERARIO_ACTUAL)) return;
 
-    // 🔥 FILTRO DÍA
     if (!data.dias || !data.dias.includes(diaHoy)) return;
 
     servicios.push({
@@ -138,7 +178,7 @@ function fichar(id, tipo) {
 }
 
 // ================= INIT =================
-cargarServicios();
+iniciarApp();
 
 </script>
 
