@@ -7,13 +7,20 @@
 
 <style>
 body { font-family: Arial; background:#f4f7fa; }
-.container { max-width:600px; margin:auto; padding:20px; }
+.container { max-width:900px; margin:auto; padding:20px; }
+
 .card { background:#fff; padding:15px; border-radius:10px; margin-bottom:10px; }
-.btn { padding:12px; margin-top:10px; width:100%; border:none; border-radius:8px; }
+
+.btn { padding:12px; margin-top:10px; width:100%; border:none; border-radius:8px; cursor:pointer; }
+
 .btn-entrar { background:#27a85a; color:#fff; }
 .btn-ver { background:#1a8fcb; color:#fff; }
-.login-box { background:#fff; padding:20px; border-radius:10px; text-align:center; }
+
 input { padding:10px; width:100%; margin-top:10px; }
+
+.row-ok { border-left:6px solid #27a85a; }
+.row-debe { border-left:6px solid #d63031; }
+.row-extra { border-left:6px solid #f39c12; }
 </style>
 </head>
 
@@ -21,20 +28,12 @@ input { padding:10px; width:100%; margin-top:10px; }
 
 <div class="container">
 
-<div id="login">
-  <div class="login-box">
-    <h2>Ingreso Operario</h2>
-    <input type="text" id="usuario" placeholder="Apellido">
-    <button class="btn btn-entrar" onclick="login()">Ingresar</button>
-  </div>
-</div>
+<h2>Panel MegaClean</h2>
 
-<div id="app" style="display:none;">
-  <h2>Gestión de Horas</h2>
-  <button onclick="logout()">Cerrar sesión</button>
-  <button class="btn btn-ver" onclick="verResumen()">Ver resumen completo</button>
-  <div id="resumen"></div>
-</div>
+<input type="text" id="usuario" placeholder="Apellido o admin">
+<button class="btn btn-entrar" onclick="login()">Ingresar</button>
+
+<div id="contenido"></div>
 
 </div>
 
@@ -52,68 +51,67 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+let esAdmin = false;
 let OPERARIO_ID = null;
 
 // LOGIN
 async function login() {
+
   const input = document.getElementById("usuario").value.toLowerCase().trim();
-  if (!input) return alert("Ingresá tu apellido");
+
+  if (input === "admin") {
+    esAdmin = true;
+    cargarAdmin();
+    return;
+  }
 
   const snapshot = await db.collection("horas_usuarios").get();
 
-  let encontrado = null;
   snapshot.forEach(doc => {
-    if (doc.id.includes(input)) encontrado = doc.id;
+    if (doc.id.includes(input)) {
+      OPERARIO_ID = doc.id;
+    }
   });
 
-  if (!encontrado) return alert("Operario no encontrado");
+  if (!OPERARIO_ID) return alert("No encontrado");
 
-  localStorage.setItem("operario_id", encontrado);
-  iniciarApp();
+  cargarOperario();
 }
 
-function logout() {
-  localStorage.removeItem("operario_id");
-  location.reload();
-}
+// ================= ADMIN =================
+async function cargarAdmin() {
 
-function iniciarApp() {
-  OPERARIO_ID = localStorage.getItem("operario_id");
-  if (!OPERARIO_ID) return;
-
-  document.getElementById("login").style.display = "none";
-  document.getElementById("app").style.display = "block";
-}
-
-// ================= RESUMEN =================
-async function verResumen() {
+  const cont = document.getElementById("contenido");
+  cont.innerHTML = "<h3>Cargando...</h3>";
 
   const hoy = new Date();
   const mes = hoy.getMonth();
   const año = hoy.getFullYear();
 
-  // 🔥 RECIBO
-  const userDoc = await db.collection("horas_usuarios").doc(OPERARIO_ID).get();
-  const horasRecibo = userDoc.data().horasRecibo || 0;
-
-  // 🔥 SERVICIOS
-  const serviciosSnap = await db.collection("horas_servicios").get();
+  const usuarios = await db.collection("horas_usuarios").get();
+  const servicios = await db.collection("horas_servicios").get();
+  const fichajes = await db.collection("fichajes").get();
 
   let mapaServicios = {};
-  let serviciosFijos = [];
-  let horasObjetivo = 0;
+  servicios.forEach(s => mapaServicios[s.id] = s.data());
 
-  serviciosSnap.forEach(doc => {
+  let html = "";
 
-    const data = doc.data();
-    mapaServicios[doc.id] = data;
+  for (const userDoc of usuarios.docs) {
 
-    if (!data.operarios || !data.operarios.includes(OPERARIO_ID)) return;
-    if (data.tipo !== "FIJO") return;
+    const userId = userDoc.id;
+    const user = userDoc.data();
 
-    serviciosFijos.push({ id: doc.id, ...data });
+    let horasObjetivo = 0;
+    let variableMs = 0;
 
-    if (data.horaInicio && data.horaFin && data.dias) {
+    // FIJO
+    servicios.forEach(doc => {
+
+      const data = doc.data();
+
+      if (!data.operarios || !data.operarios.includes(userId)) return;
+      if (data.tipo !== "FIJO") return;
 
       const [h1, m1] = data.horaInicio.split(":").map(Number);
       const [h2, m2] = data.horaFin.split(":").map(Number);
@@ -122,98 +120,64 @@ async function verResumen() {
       const diasSemana = data.dias.length;
 
       horasObjetivo += horasDia * diasSemana * 4;
-    }
-  });
+    });
 
-  // 🔥 FICHAJES
-  const fichajesSnap = await db.collection("fichajes")
-    .where("operario","==",OPERARIO_ID)
-    .get();
+    // VARIABLE
+    let entrada = null;
 
-  let entrada = null;
-  let variableMs = 0;
-  let diasPorServicio = {};
+    fichajes.forEach(f => {
 
-  fichajesSnap.forEach(doc => {
+      const d = f.data();
+      if (d.operario !== userId || !d.timestamp) return;
 
-    const d = doc.data();
-    if (!d.timestamp || !d.servicio) return;
+      const fecha = new Date(d.timestamp);
+      if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
 
-    const fecha = new Date(d.timestamp);
+      if (d.tipo === "entrada") entrada = { t: d.timestamp, servicio: d.servicio };
 
-    if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
+      if (d.tipo === "salida" && entrada) {
 
-    const diaClave = fecha.toISOString().split("T")[0];
+        const servicio = mapaServicios[entrada.servicio];
 
-    if (!diasPorServicio[d.servicio]) {
-      diasPorServicio[d.servicio] = new Set();
-    }
+        if (!servicio || servicio.tipo !== "FIJO") {
+          variableMs += (d.timestamp - entrada.t);
+        }
 
-    diasPorServicio[d.servicio].add(diaClave);
-
-    if (d.tipo === "entrada") {
-      entrada = { t: d.timestamp, servicio: d.servicio };
-    }
-
-    if (d.tipo === "salida" && entrada) {
-
-      const duracion = d.timestamp - entrada.t;
-      const servicioData = mapaServicios[entrada.servicio];
-
-      if (!servicioData || servicioData.tipo !== "FIJO") {
-        variableMs += duracion;
+        entrada = null;
       }
 
-      entrada = null;
-    }
-  });
+    });
 
-  const horasVariables = variableMs / 1000 / 60 / 60;
+    const horasVariables = variableMs / 1000 / 60 / 60;
+    const total = horasObjetivo + horasVariables;
+    const recibo = user.horasRecibo || 0;
 
-  // 💣 FALTAS CORRECTAS
-  let faltasHoras = 0;
+    const diff = total - recibo;
 
-  serviciosFijos.forEach(serv => {
+    let clase = "row-ok";
+    if (diff < -5) clase = "row-debe";
+    if (diff > 5) clase = "row-extra";
 
-    const diasEsperados = serv.dias.length * 4;
+    html += `
+      <div class="card ${clase}">
+        <b>${user.nombre}</b><br>
+        FIJO: ${horasObjetivo.toFixed(1)} |
+        VAR: ${horasVariables.toFixed(1)} |
+        TOTAL: ${total.toFixed(1)} |
+        RECIBO: ${recibo} |
+        DIF: ${diff.toFixed(1)}
+      </div>
+    `;
+  }
 
-    const trabajados = diasPorServicio[serv.id]
-      ? diasPorServicio[serv.id].size
-      : 0;
-
-    const faltas = Math.max(0, diasEsperados - trabajados);
-
-    const [h1, m1] = serv.horaInicio.split(":").map(Number);
-    const [h2, m2] = serv.horaFin.split(":").map(Number);
-
-    const horasDia = (h2 + m2/60) - (h1 + m1/60);
-
-    faltasHoras += faltas * horasDia;
-  });
-
-  // 💣 TOTAL FINAL
-  const totalTrabajado = horasObjetivo + horasVariables;
-  const diferencia = totalTrabajado - horasRecibo;
-
-  document.getElementById("resumen").innerHTML = `
-    <div class="card">
-      <b>Operario:</b> ${OPERARIO_ID}<br><br>
-
-      <b>FIJO objetivo:</b> ${horasObjetivo.toFixed(1)}<br>
-      <b>VARIABLE:</b> ${horasVariables.toFixed(1)}<br><br>
-
-      <b>TOTAL trabajado:</b> ${totalTrabajado.toFixed(1)}<br>
-      <b>RECIBO:</b> ${horasRecibo}<br><br>
-
-      <b>FALTAS:</b> ${faltasHoras.toFixed(1)} hs<br><br>
-
-      <b>DIFERENCIA FINAL:</b> ${diferencia.toFixed(1)} hs<br>
-      <b>${diferencia >= 0 ? "PAGAR HORAS EXTRA" : "DEBE HORAS"}</b>
-    </div>
-  `;
+  cont.innerHTML = html;
 }
 
-iniciarApp();
+// ================= OPERARIO =================
+function cargarOperario() {
+  document.getElementById("contenido").innerHTML =
+    "<h3>Modo operario activo (usar versión anterior)</h3>";
+}
 
 </script>
 
