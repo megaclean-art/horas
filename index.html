@@ -443,19 +443,33 @@ async function fsGet(col, id) {
 }
 
 async function fsList(col) {
-  let allDocs = [];
-  let pageToken = '';
-  let attempts = 0;
-  do {
-    const url = `${API}/${col}?pageSize=200${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
-    const r = await fetch(url);
-    if (!r.ok) break;
-    const data = await r.json();
-    if (data.documents) allDocs = allDocs.concat(data.documents.map(fromFS));
-    pageToken = data.nextPageToken || '';
-    attempts++;
-    if (attempts > 20) break; // seguridad máx 20 páginas = 4000 docs
-  } while (pageToken);
+  // Primera página para obtener el total y el token
+  const url1 = `${API}/${col}?pageSize=300`;
+  const r1 = await fetch(url1);
+  if (!r1.ok) return [];
+  const d1 = await r1.json();
+  let allDocs = (d1.documents || []).map(fromFS);
+  
+  // Si no hay más páginas, retornar
+  if (!d1.nextPageToken) return allDocs;
+
+  // Hay más — continuar paginando secuencialmente
+  let pageToken = d1.nextPageToken;
+  let safety = 0;
+  while (pageToken && safety < 10) {
+    safety++;
+    try {
+      const url = `${API}/${col}?pageSize=300&pageToken=${encodeURIComponent(pageToken)}`;
+      const r = await fetch(url);
+      if (!r.ok) break;
+      const d = await r.json();
+      if (d.documents) allDocs = allDocs.concat(d.documents.map(fromFS));
+      pageToken = d.nextPageToken || '';
+    } catch(e) {
+      console.warn('fsList pagination error:', e);
+      break;
+    }
+  }
   return allDocs;
 }
 
