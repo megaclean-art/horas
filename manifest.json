@@ -1,0 +1,8 @@
+{
+  "name": "MegaClean Gestión",
+  "short_name": "MegaClean",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1a8fcb"
+}
