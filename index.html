@@ -101,7 +101,6 @@ async function verResumen() {
 
   let mapaServicios = {};
   let serviciosFijos = [];
-
   let horasObjetivo = 0;
 
   serviciosSnap.forEach(doc => {
@@ -133,20 +132,24 @@ async function verResumen() {
 
   let entrada = null;
   let variableMs = 0;
-
-  let diasTrabajados = new Set();
+  let diasPorServicio = {};
 
   fichajesSnap.forEach(doc => {
 
     const d = doc.data();
-    if (!d.timestamp) return;
+    if (!d.timestamp || !d.servicio) return;
 
     const fecha = new Date(d.timestamp);
 
     if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
 
     const diaClave = fecha.toISOString().split("T")[0];
-    diasTrabajados.add(diaClave);
+
+    if (!diasPorServicio[d.servicio]) {
+      diasPorServicio[d.servicio] = new Set();
+    }
+
+    diasPorServicio[d.servicio].add(diaClave);
 
     if (d.tipo === "entrada") {
       entrada = { t: d.timestamp, servicio: d.servicio };
@@ -167,20 +170,16 @@ async function verResumen() {
 
   const horasVariables = variableMs / 1000 / 60 / 60;
 
-  // 💣 FALTAS
+  // 💣 FALTAS CORRECTAS
   let faltasHoras = 0;
 
   serviciosFijos.forEach(serv => {
 
-    if (!serv.dias) return;
-
     const diasEsperados = serv.dias.length * 4;
 
-    let trabajados = 0;
-
-    diasTrabajados.forEach(dia => {
-      trabajados++;
-    });
+    const trabajados = diasPorServicio[serv.id]
+      ? diasPorServicio[serv.id].size
+      : 0;
 
     const faltas = Math.max(0, diasEsperados - trabajados);
 
@@ -192,7 +191,7 @@ async function verResumen() {
     faltasHoras += faltas * horasDia;
   });
 
-  // 💣 TOTAL
+  // 💣 TOTAL FINAL
   const totalTrabajado = horasObjetivo + horasVariables;
   const diferencia = totalTrabajado - horasRecibo;
 
