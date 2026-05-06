@@ -2014,6 +2014,7 @@ async function exportarFacturables() {
 }
 
 
+async function cambiarEstadoCobertura(id, nuevoEstado) {
   const labels = { ACTIVA: 'reactivar', PAUSADA: 'pausar', CERRADA: 'cerrar' };
   if (!confirm(`¿Deseas ${labels[nuevoEstado]} esta cobertura?`)) return;
   await fsSave('horas_coberturas', id, { estado: nuevoEstado });
