@@ -1064,6 +1064,14 @@ async function modalOperario(id = null) {
           <label>Horas por semana</label>
           <input id="op-hs" type="number" step="0.5" placeholder="Ej: 24" value="${o.horasSemana||''}">
         </div>
+        <div class="field-sm">
+          <label>Horas de recibo mensuales <span style="color:var(--accent);font-size:10px">(del recibo de sueldo)</span></label>
+          <input id="op-recibo" type="number" placeholder="Ej: 144" value="${o.horasRecibo||''}">
+        </div>
+        <div class="field-sm">
+          <label>Legajo Skylab <span style="color:var(--text3);font-size:10px">(opcional)</span></label>
+          <input id="op-legajo" placeholder="Ej: 00064" value="${o.legajo||''}">
+        </div>
         <div class="modal-actions">
           <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
           <button class="btn-primary" onclick="guardarOperario('${id||''}')">
@@ -1087,11 +1095,15 @@ async function guardarOperario(id = '') {
   const rol = document.getElementById('op-rol').value;
   const tipo = document.getElementById('op-tipo').value;
   const hs = Number(document.getElementById('op-hs')?.value || 0);
+  const horasRecibo = Number(document.getElementById('op-recibo')?.value || 0);
+  const legajo = document.getElementById('op-legajo')?.value.trim() || '';
 
   if (!nombre) return toast('El nombre es obligatorio', 'warn');
   if (!id && !pass) return toast('La contraseña es obligatoria para usuarios nuevos', 'warn');
 
   const data = { nombre, dni, rol, tipo, horasSemana: hs, activo: true };
+  if (horasRecibo) data.horasRecibo = horasRecibo;
+  if (legajo) data.legajo = legajo;
   if (pass) data.password = pass;
 
   if (id) {
