@@ -445,7 +445,7 @@ async function fsGet(col, id) {
 // Cache simple por sesión para evitar requests repetidas
 const _fsCache = {};
 const _fsCacheTime = {};
-const CACHE_TTL = 60000; // 60 segundos
+const CACHE_TTL = 300000; // 5 minutos
 
 async function fsListPage(col, pageToken) {
   const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
@@ -976,6 +976,8 @@ async function renderDashboard() {
     <button class="btn-secondary" style="margin-top:8px;padding:8px 16px;font-size:13px" onclick="recargarDashboard()">🔄 Actualizar datos</button>`;
 
   // Solo cargar operarios al inicio (colección más pequeña)
+  // Esperar 2 segundos para no competir con otras requests iniciales
+  await new Promise(res => setTimeout(res, 2000));
   try {
     const operarios = await fsList('horas_usuarios');
     const el = document.getElementById('d-ops');
