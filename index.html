@@ -3,24 +3,61 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MegaClean Gestión</title>
+<title>MegaClean Panel</title>
 
 <style>
-body { font-family: Arial; background:#f4f7fa; }
-.container { max-width:900px; margin:auto; padding:20px; }
+body {
+  font-family: Arial;
+  background: #eef2f6;
+}
 
-.card { background:#fff; padding:15px; border-radius:10px; margin-bottom:10px; }
+.container {
+  max-width: 1100px;
+  margin: auto;
+  padding: 20px;
+}
 
-.btn { padding:12px; margin-top:10px; width:100%; border:none; border-radius:8px; cursor:pointer; }
+h2 {
+  margin-bottom: 10px;
+}
 
-.btn-entrar { background:#27a85a; color:#fff; }
-.btn-ver { background:#1a8fcb; color:#fff; }
+input {
+  padding: 10px;
+  width: 100%;
+  margin-bottom: 10px;
+}
 
-input { padding:10px; width:100%; margin-top:10px; }
+.btn {
+  padding: 12px;
+  width: 100%;
+  background: #27a85a;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
 
-.row-ok { border-left:6px solid #27a85a; }
-.row-debe { border-left:6px solid #d63031; }
-.row-extra { border-left:6px solid #f39c12; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px,1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.card {
+  background: white;
+  border-radius: 10px;
+  padding: 15px;
+}
+
+.ok { border-left: 6px solid #27a85a; }
+.debe { border-left: 6px solid #d63031; }
+.extra { border-left: 6px solid #f39c12; }
+
+.rank-title {
+  margin-top: 30px;
+  font-size: 18px;
+}
 </style>
 </head>
 
@@ -30,8 +67,8 @@ input { padding:10px; width:100%; margin-top:10px; }
 
 <h2>Panel MegaClean</h2>
 
-<input type="text" id="usuario" placeholder="Apellido o admin">
-<button class="btn btn-entrar" onclick="login()">Ingresar</button>
+<input type="text" id="usuario" placeholder="Ingresar 'admin'">
+<button class="btn" onclick="login()">Entrar</button>
 
 <div id="contenido"></div>
 
@@ -51,38 +88,20 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-let esAdmin = false;
-let OPERARIO_ID = null;
-
-// LOGIN
 async function login() {
 
-  const input = document.getElementById("usuario").value.toLowerCase().trim();
+  const input = document.getElementById("usuario").value;
 
-  if (input === "admin") {
-    esAdmin = true;
-    cargarAdmin();
-    return;
-  }
+  if (input !== "admin") return alert("Solo admin");
 
-  const snapshot = await db.collection("horas_usuarios").get();
-
-  snapshot.forEach(doc => {
-    if (doc.id.includes(input)) {
-      OPERARIO_ID = doc.id;
-    }
-  });
-
-  if (!OPERARIO_ID) return alert("No encontrado");
-
-  cargarOperario();
+  cargarDashboard();
 }
 
-// ================= ADMIN =================
-async function cargarAdmin() {
+// ================= DASHBOARD =================
+async function cargarDashboard() {
 
   const cont = document.getElementById("contenido");
-  cont.innerHTML = "<h3>Cargando...</h3>";
+  cont.innerHTML = "Cargando...";
 
   const hoy = new Date();
   const mes = hoy.getMonth();
@@ -95,31 +114,31 @@ async function cargarAdmin() {
   let mapaServicios = {};
   servicios.forEach(s => mapaServicios[s.id] = s.data());
 
-  let html = "";
+  let resultados = [];
 
-  for (const userDoc of usuarios.docs) {
+  for (const u of usuarios.docs) {
 
-    const userId = userDoc.id;
-    const user = userDoc.data();
+    const userId = u.id;
+    const user = u.data();
 
     let horasObjetivo = 0;
     let variableMs = 0;
 
     // FIJO
-    servicios.forEach(doc => {
+    servicios.forEach(s => {
 
-      const data = doc.data();
+      const data = s.data();
 
       if (!data.operarios || !data.operarios.includes(userId)) return;
       if (data.tipo !== "FIJO") return;
 
-      const [h1, m1] = data.horaInicio.split(":").map(Number);
-      const [h2, m2] = data.horaFin.split(":").map(Number);
+      const [h1,m1] = data.horaInicio.split(":").map(Number);
+      const [h2,m2] = data.horaFin.split(":").map(Number);
 
-      const horasDia = (h2 + m2/60) - (h1 + m1/60);
-      const diasSemana = data.dias.length;
+      const horasDia = (h2+m2/60)-(h1+m1/60);
+      const dias = data.dias.length;
 
-      horasObjetivo += horasDia * diasSemana * 4;
+      horasObjetivo += horasDia * dias * 4;
     });
 
     // VARIABLE
@@ -128,55 +147,83 @@ async function cargarAdmin() {
     fichajes.forEach(f => {
 
       const d = f.data();
+
       if (d.operario !== userId || !d.timestamp) return;
 
       const fecha = new Date(d.timestamp);
       if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
 
-      if (d.tipo === "entrada") entrada = { t: d.timestamp, servicio: d.servicio };
+      if (d.tipo === "entrada") entrada = {t:d.timestamp, servicio:d.servicio};
 
       if (d.tipo === "salida" && entrada) {
 
-        const servicio = mapaServicios[entrada.servicio];
+        const serv = mapaServicios[entrada.servicio];
 
-        if (!servicio || servicio.tipo !== "FIJO") {
+        if (!serv || serv.tipo !== "FIJO") {
           variableMs += (d.timestamp - entrada.t);
         }
 
         entrada = null;
       }
-
     });
 
-    const horasVariables = variableMs / 1000 / 60 / 60;
-    const total = horasObjetivo + horasVariables;
+    const variable = variableMs / 1000 / 60 / 60;
+    const total = horasObjetivo + variable;
     const recibo = user.horasRecibo || 0;
 
     const diff = total - recibo;
 
-    let clase = "row-ok";
-    if (diff < -5) clase = "row-debe";
-    if (diff > 5) clase = "row-extra";
-
-    html += `
-      <div class="card ${clase}">
-        <b>${user.nombre}</b><br>
-        FIJO: ${horasObjetivo.toFixed(1)} |
-        VAR: ${horasVariables.toFixed(1)} |
-        TOTAL: ${total.toFixed(1)} |
-        RECIBO: ${recibo} |
-        DIF: ${diff.toFixed(1)}
-      </div>
-    `;
+    resultados.push({
+      nombre: user.nombre,
+      fijo: horasObjetivo,
+      variable,
+      total,
+      recibo,
+      diff
+    });
   }
+
+  // 🔥 RANKING
+  resultados.sort((a,b)=>b.diff - a.diff);
+
+  // 🔝 TOP
+  const top = resultados.slice(0,5);
+  const bottom = resultados.slice(-5).reverse();
+
+  let html = "";
+
+  html += `<div class="rank-title">🏆 Mejores</div><div class="grid">`;
+  top.forEach(r => html += cardHTML(r));
+  html += "</div>";
+
+  html += `<div class="rank-title">⚠️ Deben horas</div><div class="grid">`;
+  bottom.forEach(r => html += cardHTML(r));
+  html += "</div>";
+
+  html += `<div class="rank-title">📊 Todos</div><div class="grid">`;
+  resultados.forEach(r => html += cardHTML(r));
+  html += "</div>";
 
   cont.innerHTML = html;
 }
 
-// ================= OPERARIO =================
-function cargarOperario() {
-  document.getElementById("contenido").innerHTML =
-    "<h3>Modo operario activo (usar versión anterior)</h3>";
+// CARD
+function cardHTML(r) {
+
+  let clase = "ok";
+  if (r.diff < -5) clase = "debe";
+  if (r.diff > 5) clase = "extra";
+
+  return `
+    <div class="card ${clase}">
+      <b>${r.nombre}</b><br><br>
+      FIJO: ${r.fijo.toFixed(0)}<br>
+      VAR: ${r.variable.toFixed(0)}<br>
+      TOTAL: ${r.total.toFixed(0)}<br>
+      RECIBO: ${r.recibo}<br><br>
+      <b>DIF: ${r.diff.toFixed(0)}</b>
+    </div>
+  `;
 }
 
 </script>
