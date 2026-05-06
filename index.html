@@ -104,7 +104,7 @@ async function verResumen() {
   const userDoc = await db.collection("horas_usuarios").doc(OPERARIO_ID).get();
   const horasRecibo = userDoc.exists ? userDoc.data().horasRecibo || 0 : 0;
 
-  // 🔥 HORAS TRABAJADAS
+  // 🔥 HORAS TRABAJADAS (para después usar en variables)
   const fichajes = await db.collection("fichajes")
     .where("operario","==",OPERARIO_ID)
     .get();
@@ -131,7 +131,7 @@ async function verResumen() {
 
   const horasTrabajadas = totalMs / 1000 / 60 / 60;
 
-  // 🔥 HORAS OBJETIVO (USANDO HORA INICIO / FIN)
+  // 🔥 HORAS OBJETIVO (FIJO)
   const servicios = await db.collection("horas_servicios").get();
 
   let horasObjetivo = 0;
@@ -157,19 +157,18 @@ async function verResumen() {
     }
   });
 
-  // 🔥 DIFERENCIA FINAL
-  const diferencia = horasTrabajadas - horasRecibo;
+  // 💣 DIFERENCIA CORRECTA (FIJO vs RECIBO)
+  const diferencia = horasObjetivo - horasRecibo;
 
   document.getElementById("resumen").innerHTML = `
     <div class="card">
       <b>Operario:</b> ${OPERARIO_ID}<br><br>
 
-      <b>Horas objetivo:</b> ${horasObjetivo.toFixed(1)}<br>
-      <b>Horas trabajadas:</b> ${horasTrabajadas.toFixed(1)}<br>
+      <b>Horas objetivo (FIJO):</b> ${horasObjetivo.toFixed(1)}<br>
       <b>Horas recibo:</b> ${horasRecibo}<br><br>
 
       <b>Diferencia:</b> ${diferencia.toFixed(1)} hs<br>
-      <b>${diferencia >= 0 ? "PAGAR HORAS EXTRA" : "DEBE HORAS"}</b>
+      <b>${diferencia >= 0 ? "OK / PAGAR EXTRA SI CORRESPONDE" : "DEBE HORAS"}</b>
     </div>
   `;
 }
