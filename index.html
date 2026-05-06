@@ -434,7 +434,7 @@ async function fsGet(col, id) {
 }
 
 async function fsList(col, filter) {
-  let url = `${API}/${col}?pageSize=200`;
+  let url = `${API}/${col}?pageSize=500`;
   const r = await fetch(url);
   if (!r.ok) return [];
   const data = await r.json();
