@@ -442,35 +442,52 @@ async function fsGet(col, id) {
   return fromFS(await r.json());
 }
 
-async function fsList(col) {
-  // Primera página para obtener el total y el token
-  const url1 = `${API}/${col}?pageSize=300`;
-  const r1 = await fetch(url1);
-  if (!r1.ok) return [];
-  const d1 = await r1.json();
-  let allDocs = (d1.documents || []).map(fromFS);
-  
-  // Si no hay más páginas, retornar
-  if (!d1.nextPageToken) return allDocs;
+// Cache simple por sesión para evitar requests repetidas
+const _fsCache = {};
+const _fsCacheTime = {};
+const CACHE_TTL = 30000; // 30 segundos
 
-  // Hay más — continuar paginando secuencialmente
-  let pageToken = d1.nextPageToken;
+async function fsList(col) {
+  // Usar cache si está fresco
+  const now = Date.now();
+  if (_fsCache[col] && (now - (_fsCacheTime[col]||0)) < CACHE_TTL) {
+    return _fsCache[col];
+  }
+
+  let allDocs = [];
+  let pageToken = '';
   let safety = 0;
-  while (pageToken && safety < 10) {
-    safety++;
+  do {
     try {
-      const url = `${API}/${col}?pageSize=300&pageToken=${encodeURIComponent(pageToken)}`;
+      const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
       const r = await fetch(url);
+      if (r.status === 429) {
+        await new Promise(res => setTimeout(res, 2000));
+        continue;
+      }
       if (!r.ok) break;
-      const d = await r.json();
-      if (d.documents) allDocs = allDocs.concat(d.documents.map(fromFS));
-      pageToken = d.nextPageToken || '';
+      const data = await r.json();
+      if (data.documents) allDocs = allDocs.concat(data.documents.map(fromFS));
+      pageToken = data.nextPageToken || '';
+      if (pageToken) await new Promise(res => setTimeout(res, 400));
     } catch(e) {
-      console.warn('fsList pagination error:', e);
+      console.warn('fsList error:', e);
       break;
     }
-  }
+    safety++;
+    if (safety > 15) break;
+  } while (pageToken);
+
+  // Guardar en cache
+  _fsCache[col] = allDocs;
+  _fsCacheTime[col] = now;
   return allDocs;
+}
+
+// Invalidar cache de una colección (llamar después de escribir)
+function invalidarCache(col) {
+  delete _fsCache[col];
+  delete _fsCacheTime[col];
 }
 
 async function fsSave(col, id, data) {
@@ -942,11 +959,9 @@ async function renderDashboard() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Dashboard</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
 
-  const [operarios, servicios, fichadas] = await Promise.all([
-    fsList('horas_usuarios'),
-    fsList('horas_servicios'),
-    fsList('horas_fichadas')
-  ]);
+  const operarios = await fsList('horas_usuarios');
+  const servicios = await fsList('horas_servicios');
+  const fichadas = await fsList('horas_fichadas');
 
   const fichadasHoy = fichadas.filter(f => f.fecha === isoHoy());
   const fichadasMes = fichadas.filter(f => f.fecha && f.fecha.startsWith(isoHoy().slice(0,7)));
@@ -1108,9 +1123,11 @@ async function guardarOperario(id = '') {
 
   if (id) {
     await fsSave('horas_usuarios', id, data);
+    invalidarCache('horas_usuarios');
     toast(`✓ ${nombre} actualizado`, 'ok');
   } else {
     await fsAdd('horas_usuarios', data);
+    invalidarCache('horas_usuarios');
     toast(`✓ ${nombre} creado`, 'ok');
   }
   cerrarModal();
@@ -1490,10 +1507,12 @@ async function guardarServicio(id = '') {
     await fsDelete('horas_servicios', id);
     const ok = await fsSave('horas_servicios', id, data);
     if (!ok) return toast('❌ Error al guardar — revisá la consola F12', 'error');
+    invalidarCache('horas_servicios');
     toast(`✓ ${cliente} actualizado`, 'ok');
   } else {
     const newId = await fsAdd('horas_servicios', data);
     if (!newId) return toast('❌ Error al crear el servicio — revisá la consola F12', 'error');
+    invalidarCache('horas_servicios');
     toast(`✓ ${cliente} creado`, 'ok');
   }
 
