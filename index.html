@@ -12,13 +12,9 @@ body {
 }
 
 .container {
-  max-width: 1100px;
+  max-width: 1000px;
   margin: auto;
   padding: 20px;
-}
-
-h2 {
-  margin-bottom: 10px;
 }
 
 input {
@@ -37,26 +33,43 @@ input {
   cursor: pointer;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px,1fr));
-  gap: 10px;
-  margin-top: 20px;
+.section {
+  margin-top: 25px;
 }
 
-.card {
+.title {
+  padding: 12px;
+  border-radius: 8px;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.rojo { background: #d63031; }
+.verde { background: #27a85a; }
+.amarillo { background: #f39c12; }
+
+.tabla {
   background: white;
-  border-radius: 10px;
-  padding: 15px;
+  margin-top: 5px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.ok { border-left: 6px solid #27a85a; }
-.debe { border-left: 6px solid #d63031; }
-.extra { border-left: 6px solid #f39c12; }
+.fila {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
 
-.rank-title {
-  margin-top: 30px;
-  font-size: 18px;
+.fila.header {
+  font-weight: bold;
+  background: #f5f5f5;
+}
+
+.hidden {
+  display: none;
 }
 </style>
 </head>
@@ -67,7 +80,7 @@ input {
 
 <h2>Panel MegaClean</h2>
 
-<input type="text" id="usuario" placeholder="Ingresar 'admin'">
+<input type="text" id="usuario" placeholder="admin">
 <button class="btn" onclick="login()">Entrar</button>
 
 <div id="contenido"></div>
@@ -89,12 +102,13 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 async function login() {
-
-  const input = document.getElementById("usuario").value;
-
-  if (input !== "admin") return alert("Solo admin");
-
+  if (document.getElementById("usuario").value !== "admin") return alert("Solo admin");
   cargarDashboard();
+}
+
+function toggle(id) {
+  const el = document.getElementById(id);
+  el.classList.toggle("hidden");
 }
 
 // ================= DASHBOARD =================
@@ -114,7 +128,9 @@ async function cargarDashboard() {
   let mapaServicios = {};
   servicios.forEach(s => mapaServicios[s.id] = s.data());
 
-  let resultados = [];
+  let deben = [];
+  let ok = [];
+  let pagar = [];
 
   for (const u of usuarios.docs) {
 
@@ -124,9 +140,7 @@ async function cargarDashboard() {
     let horasObjetivo = 0;
     let variableMs = 0;
 
-    // FIJO
     servicios.forEach(s => {
-
       const data = s.data();
 
       if (!data.operarios || !data.operarios.includes(userId)) return;
@@ -136,16 +150,12 @@ async function cargarDashboard() {
       const [h2,m2] = data.horaFin.split(":").map(Number);
 
       const horasDia = (h2+m2/60)-(h1+m1/60);
-      const dias = data.dias.length;
-
-      horasObjetivo += horasDia * dias * 4;
+      horasObjetivo += horasDia * data.dias.length * 4;
     });
 
-    // VARIABLE
     let entrada = null;
 
     fichajes.forEach(f => {
-
       const d = f.data();
 
       if (d.operario !== userId || !d.timestamp) return;
@@ -156,7 +166,6 @@ async function cargarDashboard() {
       if (d.tipo === "entrada") entrada = {t:d.timestamp, servicio:d.servicio};
 
       if (d.tipo === "salida" && entrada) {
-
         const serv = mapaServicios[entrada.servicio];
 
         if (!serv || serv.tipo !== "FIJO") {
@@ -173,55 +182,61 @@ async function cargarDashboard() {
 
     const diff = total - recibo;
 
-    resultados.push({
+    const fila = {
       nombre: user.nombre,
-      fijo: horasObjetivo,
-      variable,
-      total,
+      total: total.toFixed(0),
       recibo,
-      diff
-    });
+      diff: diff.toFixed(0)
+    };
+
+    if (diff < -2) deben.push(fila);
+    else if (diff > 2) pagar.push(fila);
+    else ok.push(fila);
   }
 
-  // 🔥 RANKING
-  resultados.sort((a,b)=>b.diff - a.diff);
+  // 🔥 ORDEN
+  deben.sort((a,b)=>a.diff - b.diff);
+  pagar.sort((a,b)=>b.diff - a.diff);
 
-  // 🔝 TOP
-  const top = resultados.slice(0,5);
-  const bottom = resultados.slice(-5).reverse();
+  cont.innerHTML = `
+  
+  ${renderGrupo("DEBEN HORAS", "rojo", "g1", deben)}
+  ${renderGrupo("OK", "verde", "g2", ok)}
+  ${renderGrupo("PAGAR HORAS", "amarillo", "g3", pagar)}
 
-  let html = "";
-
-  html += `<div class="rank-title">🏆 Mejores</div><div class="grid">`;
-  top.forEach(r => html += cardHTML(r));
-  html += "</div>";
-
-  html += `<div class="rank-title">⚠️ Deben horas</div><div class="grid">`;
-  bottom.forEach(r => html += cardHTML(r));
-  html += "</div>";
-
-  html += `<div class="rank-title">📊 Todos</div><div class="grid">`;
-  resultados.forEach(r => html += cardHTML(r));
-  html += "</div>";
-
-  cont.innerHTML = html;
+  `;
 }
 
-// CARD
-function cardHTML(r) {
+function renderGrupo(titulo, color, id, lista) {
 
-  let clase = "ok";
-  if (r.diff < -5) clase = "debe";
-  if (r.diff > 5) clase = "extra";
+  let filas = `
+    <div class="fila header">
+      <div>Operario</div>
+      <div>Trabajado</div>
+      <div>Recibo</div>
+      <div>Diferencia</div>
+    </div>
+  `;
+
+  lista.forEach(l => {
+    filas += `
+      <div class="fila">
+        <div>${l.nombre}</div>
+        <div>${l.total}</div>
+        <div>${l.recibo}</div>
+        <div>${l.diff}</div>
+      </div>
+    `;
+  });
 
   return `
-    <div class="card ${clase}">
-      <b>${r.nombre}</b><br><br>
-      FIJO: ${r.fijo.toFixed(0)}<br>
-      VAR: ${r.variable.toFixed(0)}<br>
-      TOTAL: ${r.total.toFixed(0)}<br>
-      RECIBO: ${r.recibo}<br><br>
-      <b>DIF: ${r.diff.toFixed(0)}</b>
+    <div class="section">
+      <div class="title ${color}" onclick="toggle('${id}')">
+        ${titulo} (${lista.length})
+      </div>
+      <div class="tabla" id="${id}">
+        ${filas}
+      </div>
     </div>
   `;
 }
