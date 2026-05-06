@@ -11,11 +11,7 @@ body { font-family: Arial; background:#f4f7fa; }
 .card { background:#fff; padding:15px; border-radius:10px; margin-bottom:10px; }
 .btn { padding:12px; margin-top:10px; width:100%; border:none; border-radius:8px; }
 .btn-entrar { background:#27a85a; color:#fff; }
-.btn-salir { background:#d63d4a; color:#fff; }
 .btn-ver { background:#1a8fcb; color:#fff; }
-.estado { padding:5px; border-radius:5px; font-size:12px; display:inline-block; }
-.activo { background:#27a85a; color:#fff; }
-.inactivo { background:#999; color:#fff; }
 .login-box { background:#fff; padding:20px; border-radius:10px; text-align:center; }
 input { padding:10px; width:100%; margin-top:10px; }
 </style>
@@ -38,7 +34,6 @@ input { padding:10px; width:100%; margin-top:10px; }
   <button onclick="logout()">Cerrar sesión</button>
   <button class="btn btn-ver" onclick="verResumen()">Ver resumen</button>
   <div id="resumen"></div>
-  <div id="servicios"></div>
 </div>
 
 </div>
@@ -57,25 +52,44 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-let OPERARIO_ACTUAL = null;
+let OPERARIO_ID = null;
 
-// ================= LOGIN =================
-function login() {
-  const user = document.getElementById("usuario").value.toLowerCase().trim();
-  if (!user) return alert("Ingresá tu apellido");
+// ================= LOGIN REAL =================
+async function login() {
 
-  localStorage.setItem("operario", user);
+  const input = document.getElementById("usuario").value.toLowerCase().trim();
+
+  if (!input) return alert("Ingresá tu apellido");
+
+  const snapshot = await db.collection("horas_usuarios").get();
+
+  let encontrado = null;
+
+  snapshot.forEach(doc => {
+    if (doc.id.includes(input)) {
+      encontrado = doc.id;
+    }
+  });
+
+  if (!encontrado) {
+    alert("Operario no encontrado");
+    return;
+  }
+
+  localStorage.setItem("operario_id", encontrado);
   iniciarApp();
 }
 
 function logout() {
-  localStorage.removeItem("operario");
+  localStorage.removeItem("operario_id");
   location.reload();
 }
 
 function iniciarApp() {
-  OPERARIO_ACTUAL = localStorage.getItem("operario");
-  if (!OPERARIO_ACTUAL) return;
+
+  OPERARIO_ID = localStorage.getItem("operario_id");
+
+  if (!OPERARIO_ID) return;
 
   document.getElementById("login").style.display = "none";
   document.getElementById("app").style.display = "block";
@@ -89,12 +103,12 @@ async function verResumen() {
   const año = hoy.getFullYear();
 
   // 🔥 HORAS RECIBO
-  const userDoc = await db.collection("horas_usuarios").doc("op_"+OPERARIO_ACTUAL).get();
+  const userDoc = await db.collection("horas_usuarios").doc(OPERARIO_ID).get();
   const horasRecibo = userDoc.exists ? userDoc.data().horasRecibo || 0 : 0;
 
   // 🔥 HORAS TRABAJADAS
   const fichajes = await db.collection("fichajes")
-    .where("operario","==",OPERARIO_ACTUAL)
+    .where("operario","==",OPERARIO_ID)
     .get();
 
   let totalMs = 0;
@@ -123,7 +137,7 @@ async function verResumen() {
   servicios.forEach(doc => {
     const data = doc.data();
 
-    if (!data.operarios || !data.operarios.includes("op_"+OPERARIO_ACTUAL)) return;
+    if (!data.operarios || !data.operarios.includes(OPERARIO_ID)) return;
     if (data.tipo !== "FIJO") return;
 
     if (data.horariosPorDia) {
@@ -139,15 +153,19 @@ async function verResumen() {
 
   document.getElementById("resumen").innerHTML = `
     <div class="card">
+      <b>Operario:</b> ${OPERARIO_ID}<br><br>
+
       <b>Horas objetivo:</b> ${horasObjetivo.toFixed(1)}<br>
       <b>Horas trabajadas:</b> ${horasTrabajadas.toFixed(1)}<br>
       <b>Horas recibo:</b> ${horasRecibo}<br><br>
 
       <b>Diferencia:</b> ${diferencia.toFixed(1)} hs<br>
-      <b>${diferencia >= 0 ? "PAGAR" : "DEBE HORAS"}</b>
+      <b>${diferencia >= 0 ? "PAGAR HORAS EXTRA" : "DEBE HORAS"}</b>
     </div>
   `;
 }
+
+iniciarApp();
 
 </script>
 
