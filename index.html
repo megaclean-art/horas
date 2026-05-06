@@ -1215,6 +1215,13 @@ async function modalServicio(id = null) {
             ${DIAS_SEMANA.map(d => `<button class="dia-btn ${diasSelServ.includes(d)?'sel':''}" id="dia-${d}" onclick="toggleDiaHorario('${d}')">${d}</button>`).join('')}
           </div>
 
+          <!-- Botón para replicar el horario del primero a todos -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <button onclick="replicarHorarioATodos()" class="btn-secondary" style="padding:6px 12px;font-size:12px;font-weight:600">
+              ↕ Replicar horario del primero a todos los días
+            </button>
+          </div>
+
           <!-- Filas de horario por día seleccionado -->
           <div id="sv-horarios-dias">
             ${diasSelServ.map(d => renderFilaDia(d, horariosPorDia[d] || {})).join('')}
@@ -1259,13 +1266,14 @@ function renderFilaDia(dia, horario) {
     <div>
       <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Inicio</div>
       <input type="time" id="h-inicio-${dia}" value="${horario.inicio||''}"
+        oninput="calcularHsDia('${dia}')"
         style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
     </div>
     <div>
       <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Fin</div>
       <input type="time" id="h-fin-${dia}" value="${horario.fin||''}"
-        style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none"
-        oninput="calcularHsDia('${dia}')">
+        oninput="calcularHsDia('${dia}')"
+        style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
     </div>
     <div>
       <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Hs</div>
@@ -1284,6 +1292,18 @@ function calcularHsDia(dia) {
   }
 }
 
+// Obtener el último horario cargado en los días ya seleccionados
+function obtenerUltimoHorario() {
+  for (let i = diasSelServ.length - 1; i >= 0; i--) {
+    const d = diasSelServ[i];
+    const ini = document.getElementById(`h-inicio-${d}`)?.value;
+    const fin = document.getElementById(`h-fin-${d}`)?.value;
+    const hs = document.getElementById(`h-hs-${d}`)?.value;
+    if (ini || fin) return { inicio: ini||'', fin: fin||'', hs: Number(hs)||0 };
+  }
+  return {};
+}
+
 function toggleDiaHorario(dia) {
   const btn = document.getElementById('dia-' + dia);
   const cont = document.getElementById('sv-horarios-dias');
@@ -1296,16 +1316,16 @@ function toggleDiaHorario(dia) {
     const fila = document.getElementById('fila-dia-' + dia);
     if (fila) fila.remove();
   } else {
-    // Agregar día — insertarlo en el orden correcto
+    // Agregar día — hereda el horario del último día cargado
+    const horarioHeredado = obtenerUltimoHorario();
     diasSelServ.push(dia);
     btn.classList.add('sel');
-    // Ordenar diasSelServ según DIAS_SEMANA
     diasSelServ.sort((a,b) => DIAS_SEMANA.indexOf(a) - DIAS_SEMANA.indexOf(b));
     // Insertar fila en posición correcta
     const filasActuales = Array.from(cont.children);
     const idxNuevo = diasSelServ.indexOf(dia);
     const newFila = document.createElement('div');
-    newFila.innerHTML = renderFilaDia(dia, {});
+    newFila.innerHTML = renderFilaDia(dia, horarioHeredado);
     const filaEl = newFila.firstElementChild;
     if (idxNuevo >= filasActuales.length) {
       cont.appendChild(filaEl);
@@ -1313,6 +1333,24 @@ function toggleDiaHorario(dia) {
       cont.insertBefore(filaEl, filasActuales[idxNuevo]);
     }
   }
+}
+
+function replicarHorarioATodos() {
+  if (diasSelServ.length === 0) return toast('Seleccioná al menos un día primero', 'warn');
+  const primero = diasSelServ[0];
+  const ini = document.getElementById(`h-inicio-${primero}`)?.value || '';
+  const fin = document.getElementById(`h-fin-${primero}`)?.value || '';
+  const hs = document.getElementById(`h-hs-${primero}`)?.value || '';
+  if (!ini && !fin) return toast('Cargá el horario del primer día primero', 'warn');
+  for (const d of diasSelServ) {
+    const iEl = document.getElementById(`h-inicio-${d}`);
+    const fEl = document.getElementById(`h-fin-${d}`);
+    const hEl = document.getElementById(`h-hs-${d}`);
+    if (iEl) iEl.value = ini;
+    if (fEl) fEl.value = fin;
+    if (hEl) hEl.value = hs;
+  }
+  toast(`✓ Horario replicado a ${diasSelServ.length} días`, 'ok');
 }
 
 // Mantener toggleDia para coberturas y otros usos
@@ -1396,13 +1434,6 @@ async function eliminarServicio(id, nombre) {
   _serviciosCache = _serviciosCache.filter(s => s._id !== id);
   filtrarServicios();
   toast(`${nombre} eliminado`, 'ok');
-}
-
-async function eliminarServicio(id, nombre) {
-  if (!confirm(`¿Eliminar servicio ${nombre}?`)) return;
-  await fsDelete('horas_servicios', id);
-  toast(`${nombre} eliminado`, 'ok');
-  renderServicios();
 }
 
 // ════════════════════════════════════════════
