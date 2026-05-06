@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MegaClean · Crear Usuarios Auth</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI',sans-serif; background:#f4f7fa; color:#1a2533; padding:24px; }
+  h1 { color:#1a8fcb; font-size:22px; margin-bottom:4px; }
+  .sub { color:#7a8899; font-size:13px; margin-bottom:24px; }
+  .card { background:#fff; border:1.5px solid #dce3ed; border-radius:14px; padding:22px; margin-bottom:18px; max-width:640px; box-shadow:0 2px 12px rgba(26,143,203,.08); }
+  .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .stat { font-size:40px; font-weight:900; color:#1a8fcb; }
+  .stat-label { font-size:11px; color:#8fa3b8; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
+  .btn { background:linear-gradient(135deg,#1a8fcb,#0e6fa0); color:#fff; border:none; border-radius:10px; padding:14px 28px; font-size:16px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; cursor:pointer; width:100%; max-width:640px; display:block; margin-bottom:12px; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .progress { background:#dce3ed; border-radius:4px; height:6px; max-width:640px; margin-bottom:14px; overflow:hidden; }
+  .progress-bar { height:100%; background:#1a8fcb; transition:width .25s; width:0%; border-radius:4px; }
+  .log { background:#1a2533; border-radius:10px; padding:16px; height:360px; overflow-y:auto; font-family:monospace; font-size:12px; max-width:640px; }
+  .ok { color:#27a85a; } .err { color:#d63d4a; } .info { color:#1a8fcb; } .warn { color:#e07b2a; }
+</style>
+</head>
+<body>
+<h1>MEGACLEAN · CREAR USUARIOS AUTH</h1>
+<div class="sub">Crea usuarios en Firebase Authentication — no requiere login</div>
+
+<div class="card">
+  <div class="grid">
+    <div><div class="stat" id="stat-total">—</div><div class="stat-label">Operarios</div></div>
+    <div><div class="stat" id="stat-ok" style="color:#27a85a">0</div><div class="stat-label">Creados/OK</div></div>
+    <div><div class="stat" id="stat-err" style="color:#d63d4a">0</div><div class="stat-label">Errores</div></div>
+  </div>
+</div>
+
+<div class="progress"><div class="progress-bar" id="pb"></div></div>
+<button class="btn" id="btn-load" onclick="cargarYCrear()">▶ INICIAR — CARGAR Y CREAR USUARIOS</button>
+<div class="log" id="log"></div>
+
+<script>
+const API_KEY = 'AIzaSyBg7lvQteU0aHwEyI1qe10UPK81-9DL0Ng';
+const FIRESTORE = 'https://firestore.googleapis.com/v1/projects/mega-clean-12f17/databases/(default)/documents';
+const AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`;
+
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = type; d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function pb(pct) { document.getElementById('pb').style.width = pct + '%'; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function cargarYCrear() {
+  document.getElementById('btn-load').disabled = true;
+  log('Cargando operarios de Firestore...', 'info');
+
+  // Cargar operarios — sin auth token (aún no tenemos)
+  let operarios = [];
+  let pageToken = '';
+  do {
+    const url = FIRESTORE + '/horas_usuarios?pageSize=300' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.documents) {
+      for (const doc of d.documents) {
+        const f = doc.fields || {};
+        const dni = f.dni?.stringValue || '';
+        const pass = f.password?.stringValue || '';
+        const nombre = f.nombre?.stringValue || '';
+        if (dni && pass) operarios.push({ dni, pass, nombre });
+      }
+    }
+    pageToken = d.nextPageToken || '';
+    await sleep(300);
+  } while (pageToken);
+
+  log(`✓ ${operarios.length} operarios con DNI y contraseña`, 'ok');
+  document.getElementById('stat-total').textContent = operarios.length;
+  pb(5);
+
+  // Agregar admins hardcoded
+  operarios.push({ dni: '25365716', pass: '1945', nombre: 'Roberto (Admin)' });
+  operarios.push({ dni: 'admin', pass: 'admin1234', nombre: 'Administrador' });
+
+  log('--- Creando usuarios en Firebase Auth ---', 'info');
+  log('Esto puede tardar unos minutos...', 'warn');
+
+  let ok = 0, err = 0, yaExistia = 0;
+
+  for (let i = 0; i < operarios.length; i++) {
+    const op = operarios[i];
+    const email = op.dni + '@megaclean.com.ar';
+
+    try {
+      const r = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: op.pass, returnSecureToken: false })
+      });
+      const d = await r.json();
+
+      if (d.error) {
+        if (d.error.message === 'EMAIL_EXISTS') {
+          yaExistia++;
+          ok++;
+        } else if (d.error.message?.includes('WEAK_PASSWORD')) {
+          // Contraseña muy corta — usar una más larga
+          const passLarga = op.pass + op.pass + '1';
+          const r2 = await fetch(AUTH_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password: passLarga, returnSecureToken: false })
+          });
+          const d2 = await r2.json();
+          if (!d2.error || d2.error.message === 'EMAIL_EXISTS') {
+            ok++;
+            log(`Pass reforzada: ${op.nombre} → pass: ${passLarga}`, 'warn');
+          } else {
+            err++;
+            log(`Error ${op.nombre}: ${d2.error.message}`, 'err');
+          }
+        } else {
+          err++;
+          log(`Error ${op.nombre}: ${d.error.message}`, 'err');
+        }
+      } else {
+        ok++;
+      }
+    } catch(e) {
+      err++;
+    }
+
+    document.getElementById('stat-ok').textContent = ok;
+    document.getElementById('stat-err').textContent = err;
+    pb(5 + ((i+1)/operarios.length)*95);
+
+    if ((i+1) % 15 === 0) {
+      log(`Progreso: ${i+1}/${operarios.length} · OK: ${ok} · Ya existían: ${yaExistia} · Err: ${err}`, 'ok');
+    }
+    await sleep(80);
+  }
+
+  pb(100);
+  log('', 'info');
+  log('✅ PROCESO COMPLETO', 'ok');
+  log(`Total: ${operarios.length} · Creados: ${ok-yaExistia} · Ya existían: ${yaExistia} · Errores: ${err}`, 'ok');
+  log('Ahora podés subir el index.html actualizado y los usuarios usan Firebase Auth', 'info');
+}
+</script>
+</body>
+</html>
