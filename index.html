@@ -403,9 +403,18 @@ function toFS(data) {
   for (const [k, v] of Object.entries(data)) {
     if (v === null || v === undefined) fields[k] = { nullValue: null };
     else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
-    else if (typeof v === 'number') fields[k] = { integerValue: String(v) };
+    else if (typeof v === 'number') {
+      if (Number.isInteger(v)) fields[k] = { integerValue: String(v) };
+      else fields[k] = { doubleValue: v };
+    }
     else if (typeof v === 'string') fields[k] = { stringValue: v };
-    else if (Array.isArray(v)) fields[k] = { arrayValue: { values: v.map(i => typeof i === 'string' ? { stringValue: i } : { integerValue: String(i) }) } };
+    else if (Array.isArray(v)) {
+      fields[k] = { arrayValue: { values: v.map(i => {
+        if (typeof i === 'string') return { stringValue: i };
+        if (typeof i === 'number') return { integerValue: String(i) };
+        return { stringValue: String(i) };
+      })}};
+    }
     else fields[k] = { stringValue: JSON.stringify(v) };
   }
   return { fields };
@@ -463,6 +472,11 @@ async function fsAdd(col, data) {
   const r = await fetch(`${API}/${col}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(toFS(data))
   });
+  if (!r.ok) {
+    const err = await r.json().catch(()=>({}));
+    console.error('fsAdd error:', r.status, err);
+    return null;
+  }
   const d = await r.json();
   return d.name?.split('/').pop();
 }
@@ -1447,12 +1461,13 @@ async function guardarServicio(id = '') {
   };
 
   if (id) {
-    // DELETE + CREATE para garantizar que arrays y campos se actualicen correctamente
     await fsDelete('horas_servicios', id);
-    await fsSave('horas_servicios', id, data);
+    const ok = await fsSave('horas_servicios', id, data);
+    if (!ok) return toast('❌ Error al guardar — revisá la consola F12', 'error');
     toast(`✓ ${cliente} actualizado`, 'ok');
   } else {
-    await fsAdd('horas_servicios', data);
+    const newId = await fsAdd('horas_servicios', data);
+    if (!newId) return toast('❌ Error al crear el servicio — revisá la consola F12', 'error');
     toast(`✓ ${cliente} creado`, 'ok');
   }
 
