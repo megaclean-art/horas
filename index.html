@@ -436,13 +436,16 @@ async function fsGet(col, id) {
 async function fsList(col) {
   let allDocs = [];
   let pageToken = '';
+  let attempts = 0;
   do {
-    const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + pageToken : ''}`;
+    const url = `${API}/${col}?pageSize=200${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
     const r = await fetch(url);
     if (!r.ok) break;
     const data = await r.json();
     if (data.documents) allDocs = allDocs.concat(data.documents.map(fromFS));
     pageToken = data.nextPageToken || '';
+    attempts++;
+    if (attempts > 20) break; // seguridad máx 20 páginas = 4000 docs
   } while (pageToken);
   return allDocs;
 }
