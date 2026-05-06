@@ -62,11 +62,8 @@ async function login() {
   const snapshot = await db.collection("horas_usuarios").get();
 
   let encontrado = null;
-
   snapshot.forEach(doc => {
-    if (doc.id.includes(input)) {
-      encontrado = doc.id;
-    }
+    if (doc.id.includes(input)) encontrado = doc.id;
   });
 
   if (!encontrado) return alert("Operario no encontrado");
@@ -103,6 +100,8 @@ async function verResumen() {
   const serviciosSnap = await db.collection("horas_servicios").get();
 
   let mapaServicios = {};
+  let serviciosFijos = [];
+
   let horasObjetivo = 0;
 
   serviciosSnap.forEach(doc => {
@@ -112,6 +111,8 @@ async function verResumen() {
 
     if (!data.operarios || !data.operarios.includes(OPERARIO_ID)) return;
     if (data.tipo !== "FIJO") return;
+
+    serviciosFijos.push({ id: doc.id, ...data });
 
     if (data.horaInicio && data.horaFin && data.dias) {
 
@@ -125,13 +126,15 @@ async function verResumen() {
     }
   });
 
-  // 🔥 FICHAJES (VARIABLES)
+  // 🔥 FICHAJES
   const fichajesSnap = await db.collection("fichajes")
     .where("operario","==",OPERARIO_ID)
     .get();
 
   let entrada = null;
   let variableMs = 0;
+
+  let diasTrabajados = new Set();
 
   fichajesSnap.forEach(doc => {
 
@@ -142,6 +145,9 @@ async function verResumen() {
 
     if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
 
+    const diaClave = fecha.toISOString().split("T")[0];
+    diasTrabajados.add(diaClave);
+
     if (d.tipo === "entrada") {
       entrada = { t: d.timestamp, servicio: d.servicio };
     }
@@ -149,7 +155,6 @@ async function verResumen() {
     if (d.tipo === "salida" && entrada) {
 
       const duracion = d.timestamp - entrada.t;
-
       const servicioData = mapaServicios[entrada.servicio];
 
       if (!servicioData || servicioData.tipo !== "FIJO") {
@@ -162,9 +167,33 @@ async function verResumen() {
 
   const horasVariables = variableMs / 1000 / 60 / 60;
 
-  // 💣 TOTAL CORRECTO
-  const totalTrabajado = horasObjetivo + horasVariables;
+  // 💣 FALTAS
+  let faltasHoras = 0;
 
+  serviciosFijos.forEach(serv => {
+
+    if (!serv.dias) return;
+
+    const diasEsperados = serv.dias.length * 4;
+
+    let trabajados = 0;
+
+    diasTrabajados.forEach(dia => {
+      trabajados++;
+    });
+
+    const faltas = Math.max(0, diasEsperados - trabajados);
+
+    const [h1, m1] = serv.horaInicio.split(":").map(Number);
+    const [h2, m2] = serv.horaFin.split(":").map(Number);
+
+    const horasDia = (h2 + m2/60) - (h1 + m1/60);
+
+    faltasHoras += faltas * horasDia;
+  });
+
+  // 💣 TOTAL
+  const totalTrabajado = horasObjetivo + horasVariables;
   const diferencia = totalTrabajado - horasRecibo;
 
   document.getElementById("resumen").innerHTML = `
@@ -176,6 +205,8 @@ async function verResumen() {
 
       <b>TOTAL trabajado:</b> ${totalTrabajado.toFixed(1)}<br>
       <b>RECIBO:</b> ${horasRecibo}<br><br>
+
+      <b>FALTAS:</b> ${faltasHoras.toFixed(1)} hs<br><br>
 
       <b>DIFERENCIA FINAL:</b> ${diferencia.toFixed(1)} hs<br>
       <b>${diferencia >= 0 ? "PAGAR HORAS EXTRA" : "DEBE HORAS"}</b>
