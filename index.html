@@ -15,17 +15,15 @@ body { font-family: Arial; background:#f4f7fa; }
 .btn-entrar { background:#27a85a; color:#fff; }
 .btn-salir { background:#d63d4a; color:#fff; }
 .card { background:#fff; padding:15px; border-radius:10px; margin-bottom:10px; }
-.install-banner {
-  position: fixed;
-  bottom: 10px;
-  left: 10px;
-  right: 10px;
-  background: #1a8fcb;
-  color: white;
-  padding: 12px;
-  border-radius: 10px;
-  display: none;
+.estado {
+  padding:5px;
+  border-radius:5px;
+  font-size:12px;
+  display:inline-block;
+  margin-top:5px;
 }
+.activo { background:#27a85a; color:#fff; }
+.inactivo { background:#999; color:#fff; }
 </style>
 </head>
 
@@ -36,42 +34,13 @@ body { font-family: Arial; background:#f4f7fa; }
   <div id="servicios"></div>
 </div>
 
-<div id="installBanner" class="install-banner">
-📲 Instalá MegaClean
-<button onclick="instalarApp()">Instalar</button>
-</div>
-
 <script>
 
-// ================= CONFIG =================
-const MODO_TEST = true;
-
-// ================= INSTALL =================
-let deferredPrompt;
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  document.getElementById("installBanner").style.display = "block";
-});
-
-function instalarApp() {
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    deferredPrompt.userChoice.then(() => {
-      deferredPrompt = null;
-    });
-  }
-}
-
-// ================= SERVICE WORKER =================
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
+// ================= ESTADO OPERARIO =================
+let estadoOperario = {}; 
+// ejemplo: { "1": true } → trabajando en servicio 1
 
 // ================= GPS =================
-let ultimaUbicacion = null;
-
 function obtenerUbicacion() {
   return new Promise((resolve) => {
 
@@ -81,16 +50,11 @@ function obtenerUbicacion() {
     }
 
     navigator.geolocation.getCurrentPosition(
-      pos => {
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude
-        });
-      },
-      error => {
-        console.log("GPS error:", error.message);
-        resolve({ lat: -31.42, lng: -64.18 });
-      }
+      pos => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude
+      }),
+      () => resolve({ lat: -31.42, lng: -64.18 })
     );
   });
 }
@@ -102,18 +66,8 @@ function cargarServicios() {
   const horaActual = ahora.getHours();
 
   const coberturas = [
-    {
-      id: "1",
-      cliente: "Cliente Centro",
-      desde: 8,
-      hasta: 12
-    },
-    {
-      id: "2",
-      cliente: "Banco Córdoba",
-      desde: 14,
-      hasta: 18
-    }
+    { id: "1", cliente: "Cliente Centro", desde: 8, hasta: 12 },
+    { id: "2", cliente: "Banco Córdoba", desde: 14, hasta: 18 }
   ];
 
   const activas = coberturas.filter(c => 
@@ -134,14 +88,26 @@ function renderServicios(servicios) {
   }
 
   servicios.forEach(s => {
+
+    const trabajando = estadoOperario[s.id] === true;
+
     const div = document.createElement("div");
     div.className = "card";
 
     div.innerHTML = `
       <b>${s.cliente}</b><br>
-      <small>Horario: ${s.desde}:00 a ${s.hasta}:00</small><br><br>
-      <button class="btn btn-entrar" onclick="fichar('${s.id}','entrada')">Entrar</button>
-      <button class="btn btn-salir" onclick="fichar('${s.id}','salida')">Salir</button>
+      <small>Horario: ${s.desde}:00 a ${s.hasta}:00</small><br>
+      <span class="estado ${trabajando ? 'activo' : 'inactivo'}">
+        ${trabajando ? 'Trabajando' : 'No activo'}
+      </span><br><br>
+
+      ${!trabajando ? `
+        <button class="btn btn-entrar" onclick="fichar('${s.id}','entrada')">Entrar</button>
+      ` : ''}
+
+      ${trabajando ? `
+        <button class="btn btn-salir" onclick="fichar('${s.id}','salida')">Salir</button>
+      ` : ''}
     `;
 
     cont.appendChild(div);
@@ -153,6 +119,25 @@ async function fichar(servicioId, tipo) {
 
   const ubicacion = await obtenerUbicacion();
 
+  if (tipo === "entrada") {
+
+    if (estadoOperario[servicioId]) {
+      alert("Ya estás trabajando en este servicio");
+      return;
+    }
+
+    estadoOperario[servicioId] = true;
+
+  } else {
+
+    if (!estadoOperario[servicioId]) {
+      alert("No podés salir sin haber entrado");
+      return;
+    }
+
+    estadoOperario[servicioId] = false;
+  }
+
   alert("Fichada registrada ✔");
 
   console.log({
@@ -161,6 +146,8 @@ async function fichar(servicioId, tipo) {
     ubicacion,
     hora: new Date()
   });
+
+  cargarServicios();
 }
 
 // ================= INIT =================
