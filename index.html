@@ -54,11 +54,10 @@ const db = firebase.firestore();
 
 let OPERARIO_ID = null;
 
-// ================= LOGIN REAL =================
+// ================= LOGIN =================
 async function login() {
 
   const input = document.getElementById("usuario").value.toLowerCase().trim();
-
   if (!input) return alert("Ingresá tu apellido");
 
   const snapshot = await db.collection("horas_usuarios").get();
@@ -86,7 +85,6 @@ function logout() {
 }
 
 function iniciarApp() {
-
   OPERARIO_ID = localStorage.getItem("operario_id");
 
   if (!OPERARIO_ID) return;
@@ -116,11 +114,15 @@ async function verResumen() {
 
   fichajes.forEach(doc => {
     const d = doc.data();
+
+    if (!d.timestamp) return;
+
     const fecha = new Date(d.timestamp);
 
     if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
 
     if (d.tipo === "entrada") entrada = d.timestamp;
+
     if (d.tipo === "salida" && entrada) {
       totalMs += (d.timestamp - entrada);
       entrada = null;
@@ -129,26 +131,33 @@ async function verResumen() {
 
   const horasTrabajadas = totalMs / 1000 / 60 / 60;
 
-  // 🔥 HORAS OBJETIVO
+  // 🔥 HORAS OBJETIVO (USANDO HORA INICIO / FIN)
   const servicios = await db.collection("horas_servicios").get();
 
   let horasObjetivo = 0;
 
   servicios.forEach(doc => {
+
     const data = doc.data();
 
     if (!data.operarios || !data.operarios.includes(OPERARIO_ID)) return;
     if (data.tipo !== "FIJO") return;
 
-    if (data.horariosPorDia) {
-      const horarios = JSON.parse(data.horariosPorDia);
+    if (data.horaInicio && data.horaFin && data.dias) {
 
-      Object.values(horarios).forEach(dia => {
-        horasObjetivo += dia.hs * 4;
-      });
+      const [h1, m1] = data.horaInicio.split(":").map(Number);
+      const [h2, m2] = data.horaFin.split(":").map(Number);
+
+      const horasDia = (h2 + m2/60) - (h1 + m1/60);
+      const diasSemana = data.dias.length;
+
+      const horasSemanales = horasDia * diasSemana;
+
+      horasObjetivo += horasSemanales * 4;
     }
   });
 
+  // 🔥 DIFERENCIA FINAL
   const diferencia = horasTrabajadas - horasRecibo;
 
   document.getElementById("resumen").innerHTML = `
