@@ -45,7 +45,6 @@ body { font-family: Arial; background:#f4f7fa; }
 
 // ================= CONFIG =================
 const MODO_TEST = true;
-const API_URL = "https://tu-api.com";
 
 // ================= INSTALL =================
 let deferredPrompt;
@@ -70,15 +69,13 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
 
-// ================= GPS CORREGIDO =================
+// ================= GPS =================
 let ultimaUbicacion = null;
-let ultimaActualizacion = 0;
 
 function obtenerUbicacion() {
   return new Promise((resolve) => {
 
     if (!navigator.geolocation) {
-      console.log("GPS no disponible");
       resolve({ lat: -31.42, lng: -64.18 });
       return;
     }
@@ -91,80 +88,58 @@ function obtenerUbicacion() {
         });
       },
       error => {
-        console.log("Error GPS:", error.message);
-
-        // fallback para no romper la app
-        resolve({
-          lat: -31.42,
-          lng: -64.18
-        });
+        console.log("GPS error:", error.message);
+        resolve({ lat: -31.42, lng: -64.18 });
       }
     );
   });
 }
 
-function distancia(a, b) {
-  const R = 6371e3;
-  const dLat = (b.lat - a.lat) * Math.PI/180;
-  const dLng = (b.lng - a.lng) * Math.PI/180;
-  const lat1 = a.lat * Math.PI/180;
-  const lat2 = b.lat * Math.PI/180;
-
-  const x = Math.sin(dLat/2)**2 +
-            Math.cos(lat1)*Math.cos(lat2) *
-            Math.sin(dLng/2)**2;
-
-  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
-}
-
-async function enviarUbicacion() {
-  const ahora = Date.now();
-  if (ahora - ultimaActualizacion < 120000) return;
-
-  const ubicacion = await obtenerUbicacion();
-
-  if (!ultimaUbicacion || distancia(ultimaUbicacion, ubicacion) > 50) {
-    ultimaUbicacion = ubicacion;
-    ultimaActualizacion = ahora;
-
-    if (MODO_TEST) {
-      console.log("TEST ubicación", ubicacion);
-      return;
-    }
-
-    await fetch(API_URL + "/ubicacion", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        usuario: "operario1",
-        lat: ubicacion.lat,
-        lng: ubicacion.lng
-      })
-    });
-  }
-}
-
-setInterval(enviarUbicacion, 60000);
-
-// ================= SERVICIOS =================
+// ================= COBERTURAS =================
 function cargarServicios() {
-  const servicios = [
-    { id: "1", nombre: "Cliente Centro" },
-    { id: "2", nombre: "Banco Córdoba" }
+
+  const ahora = new Date();
+  const horaActual = ahora.getHours();
+
+  const coberturas = [
+    {
+      id: "1",
+      cliente: "Cliente Centro",
+      desde: 8,
+      hasta: 12
+    },
+    {
+      id: "2",
+      cliente: "Banco Córdoba",
+      desde: 14,
+      hasta: 18
+    }
   ];
-  renderServicios(servicios);
+
+  const activas = coberturas.filter(c => 
+    horaActual >= c.desde && horaActual <= c.hasta
+  );
+
+  renderServicios(activas);
 }
 
+// ================= RENDER =================
 function renderServicios(servicios) {
   const cont = document.getElementById("servicios");
   cont.innerHTML = "";
+
+  if (servicios.length === 0) {
+    cont.innerHTML = "<p>No tenés servicios activos en este horario</p>";
+    return;
+  }
 
   servicios.forEach(s => {
     const div = document.createElement("div");
     div.className = "card";
 
     div.innerHTML = `
-      <b>${s.nombre}</b><br>
+      <b>${s.cliente}</b><br>
+      <small>Horario: ${s.desde}:00 a ${s.hasta}:00</small><br><br>
       <button class="btn btn-entrar" onclick="fichar('${s.id}','entrada')">Entrar</button>
       <button class="btn btn-salir" onclick="fichar('${s.id}','salida')">Salir</button>
     `;
@@ -175,16 +150,16 @@ function renderServicios(servicios) {
 
 // ================= FICHAR =================
 async function fichar(servicioId, tipo) {
-  console.log("CLICK DETECTADO");
-
-  alert("Fichada OK ✔");
 
   const ubicacion = await obtenerUbicacion();
 
-  console.log("Fichada:", {
+  alert("Fichada registrada ✔");
+
+  console.log({
     servicioId,
     tipo,
-    ubicacion
+    ubicacion,
+    hora: new Date()
   });
 }
 
