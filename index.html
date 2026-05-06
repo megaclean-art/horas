@@ -615,6 +615,7 @@ const TABS = {
   ],
   OPERARIO: [
     { id: 'fichar', icon: '📍', label: 'Fichar' },
+    { id: 'agenda', icon: '📆', label: 'Mi Agenda' },
     { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
   ]
 };
@@ -635,7 +636,7 @@ function navigateTo(id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   const tab = document.getElementById('tab-' + id);
   if (tab) tab.classList.add('active');
-  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, coberturas: renderCoberturas, feriados: renderFeriados, reportes: renderReportes };
+  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, agenda: renderAgenda, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, coberturas: renderCoberturas, feriados: renderFeriados, reportes: renderReportes };
   if (screens[id]) screens[id]();
 }
 
@@ -2989,6 +2990,143 @@ async function exportarCierreMensual() {
   link.href = URL.createObjectURL(blob);
   link.download = `CierreMensual_MegaClean_${mes}.csv`;
   link.click(); toast('✓ Cierre mensual exportado', 'ok');
+}
+
+// ════════════════════════════════════════════
+//  SCREEN: MI AGENDA (OPERARIO)
+// ════════════════════════════════════════════
+async function renderAgenda() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Mi Agenda</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const hoy = isoHoy();
+  const [servicios, coberturas, feriados] = await Promise.all([
+    fsList('horas_servicios'),
+    fsList('horas_coberturas'),
+    fsList('horas_feriados')
+  ]);
+
+  // ── SERVICIOS FIJOS ASIGNADOS ──
+  const misServicios = servicios.filter(s => {
+    const ops = Array.isArray(s.operarios) ? s.operarios : [];
+    return ops.includes(currentUser._id);
+  });
+
+  // ── COBERTURAS ACTIVAS ──
+  const misCoberturas = coberturas.filter(c =>
+    c.operarioId === currentUser._id &&
+    c.estado === 'ACTIVA' &&
+    (!c.fechaFin || c.fechaFin >= hoy)
+  );
+
+  // ── FERIADOS PRÓXIMOS donde estoy asignado ──
+  const misFeriados = feriados
+    .filter(f => f.fecha >= hoy)
+    .map(f => {
+      const asigs = parsearAsignaciones(f.asignaciones);
+      const miAsig = asigs.find(a => a.operarioId === currentUser._id);
+      return miAsig ? { feriado: f, asig: miAsig } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.feriado.fecha.localeCompare(b.feriado.fecha));
+
+  // Ordenar días de la semana para mostrar la agenda semanal
+  const diasOrden = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM'];
+  const diasFull = { LUN:'Lunes', MAR:'Martes', MIE:'Miércoles', JUE:'Jueves', VIE:'Viernes', SAB:'Sábado', DOM:'Domingo' };
+
+  c.innerHTML = `
+    <div class="section-title">📆 Mi Agenda</div>
+    <div class="section-sub">Tus servicios, coberturas y feriados</div>
+
+    ${misFeriados.length > 0 ? `
+    <!-- FERIADOS PRÓXIMOS -->
+    <div style="background:rgba(224,123,42,.08);border:1.5px solid rgba(224,123,42,.3);border-radius:14px;padding:16px;margin-bottom:16px">
+      <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--yellow);letter-spacing:1px;text-transform:uppercase;margin-bottom:12px">
+        📅 Feriados asignados
+      </div>
+      ${misFeriados.map(({feriado, asig}) => `
+        <div style="background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;border:1px solid rgba(224,123,42,.2)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text)">${feriado.nombre}</div>
+              <div style="font-size:13px;color:var(--yellow);font-weight:600;margin-top:2px">📅 ${formatFecha(feriado.fecha)} — ${diaSemanaDeISO(feriado.fecha)}</div>
+              <div style="font-size:12px;color:var(--text2);margin-top:4px">🏢 ${asig.clienteNombre} · ${asig.horaInicio||'--:--'} – ${asig.horaFin||'--:--'} · ${asig.horasEstimadas||0}hs</div>
+              ${asig.nota ? `<div style="font-size:12px;color:var(--accent);margin-top:4px;font-style:italic">💬 ${asig.nota}</div>` : ''}
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>` : ''}
+
+    ${misCoberturas.length > 0 ? `
+    <!-- COBERTURAS ACTIVAS -->
+    <div style="background:var(--accent-light);border:1.5px solid rgba(26,143,203,.2);border-radius:14px;padding:16px;margin-bottom:16px">
+      <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1px;text-transform:uppercase;margin-bottom:12px">
+        🔄 Coberturas activas
+      </div>
+      ${misCoberturas.map(cob => `
+        <div style="background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;border:1px solid rgba(26,143,203,.15)">
+          <div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text)">${cob.clienteNombre||'—'}</div>
+          <div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">${cob.motivo||''}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">
+            ${(cob.dias||[]).join(' · ')} · ${cob.horaInicio||'--:--'} – ${cob.horaFin||'--:--'} · ${cob.horasContratadas||0}hs/jornada
+          </div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">
+            Desde: ${formatFecha(cob.fechaInicio)} ${cob.fechaFin ? '→ Hasta: '+formatFecha(cob.fechaFin) : '→ Sin fecha de cierre'}
+          </div>
+          ${cob.observaciones ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;font-style:italic">💬 ${cob.observaciones}</div>` : ''}
+        </div>`).join('')}
+    </div>` : ''}
+
+    <!-- SERVICIOS FIJOS POR DÍA -->
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text2);letter-spacing:1px;text-transform:uppercase;margin-bottom:12px">
+      📋 Servicios fijos semanales
+    </div>
+
+    ${misServicios.length === 0 ? `
+      <div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">No tenés servicios fijos asignados</div></div>
+    ` : (() => {
+      // Agrupar por día
+      const porDia = {};
+      for (const d of diasOrden) porDia[d] = [];
+      for (const s of misServicios) {
+        for (const d of (s.dias||[])) {
+          if (porDia[d]) {
+            // Obtener horario específico del día si existe
+            let horario = { inicio: s.horaInicio, fin: s.horaFin, hs: s.horasContratadas };
+            if (s.horariosPorDia) {
+              try {
+                const hp = typeof s.horariosPorDia === 'string' ? JSON.parse(s.horariosPorDia) : s.horariosPorDia;
+                if (hp[d]) horario = { inicio: hp[d].inicio, fin: hp[d].fin, hs: hp[d].hs };
+              } catch {}
+            }
+            porDia[d].push({ ...s, _horarioDia: horario });
+          }
+        }
+      }
+      return diasOrden.map(d => {
+        if (porDia[d].length === 0) return '';
+        // Resaltar si es hoy
+        const diaHoy = DIAS_SEMANA[DIAS_JS.indexOf(new Date().getDay())];
+        const esHoy = d === diaHoy;
+        return `
+          <div style="margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <div style="font-family:var(--font-display);font-size:16px;font-weight:900;color:${esHoy?'var(--accent)':'var(--text2)'};letter-spacing:1px">
+                ${diasFull[d]}
+              </div>
+              ${esHoy ? `<span class="pill pill-green">HOY</span>` : ''}
+            </div>
+            ${porDia[d].map(s => `
+              <div style="background:${esHoy?'var(--accent-light)':'var(--surface)'};border:1.5px solid ${esHoy?'rgba(26,143,203,.3)':'var(--border)'};border-radius:10px;padding:11px 14px;margin-bottom:6px">
+                <div style="font-weight:700;font-size:14px;color:var(--text)">${s.cliente||'—'}</div>
+                ${s.direccion ? `<div style="font-size:12px;color:var(--text2);margin-top:2px">📍 ${s.direccion}</div>` : ''}
+                <div style="font-size:13px;color:var(--accent);font-weight:600;margin-top:4px">
+                  🕐 ${s._horarioDia.inicio||'--:--'} – ${s._horarioDia.fin||'--:--'} · ${s._horarioDia.hs||0}hs
+                </div>
+              </div>`).join('')}
+          </div>`;
+      }).join('');
+    })()}`;
 }
 
 function cerrarModal() {
