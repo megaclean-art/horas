@@ -2676,17 +2676,24 @@ async function renderReporteOperario() {
 }
 
 function filtrarRepOp() {
+  // Protección: si los datos no están listos todavía, no hacer nada
+  if (!window._rpOps) return;
   const q = (document.getElementById('rp-op-q')?.value||'').toLowerCase();
-  const lista = q ? (window._rpOps||[]).filter(r=>(r.op.nombre||'').toLowerCase().includes(q)||(r.op.legajo||'').includes(q)) : window._rpOps||[];
+  const lista = q ? window._rpOps.filter(r=>(r.op.nombre||'').toLowerCase().includes(q)||(r.op.legajo||'').includes(q)) : window._rpOps;
   const cont = document.getElementById('rp-op-lista');
   if (!cont) return;
   if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`; return; }
 
+  try {
   cont.innerHTML = lista.map(r => {
     const nombre = (r.op.nombre||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
     const legajo = r.op.legajo||'—';
     const tipo = r.op.tipo||'FIJO';
     const supervisor = (r.op.supervisor||'').replace(/'/g,'&#39;');
+    const hsReales = r.hsVariables || 0;
+    const hsFijas = r.hsFijas || 0;
+    const hsRecibo = r.hsRecibo || 0;
+    const diff = (hsFijas + hsReales) - hsRecibo;
     return `
     <div class="card-section" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -2696,21 +2703,21 @@ function filtrarRepOp() {
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:var(--text3)">Recibo</div>
-          <div style="font-family:var(--font-display);font-size:20px;font-weight:900;color:var(--accent)">${r.hsRecibo}hs</div>
+          <div style="font-family:var(--font-display);font-size:20px;font-weight:900;color:var(--accent)">${hsRecibo}hs</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Hs Fijas</div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${r.hsFijas.toFixed(0)}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${hsFijas.toFixed(0)}</div>
         </div>
         <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Hs Fichadas</div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${r.hsReales.toFixed(1)}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${hsReales.toFixed(1)}</div>
         </div>
-        <div style="background:${(r.hsFijas-r.hsRecibo)<0?'var(--red-light)':r.hsFijas>r.hsRecibo?'var(--green-light)':'var(--surface2)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="background:${diff<0?'var(--red-light)':diff>0?'var(--green-light)':'var(--surface2)'};border-radius:8px;padding:8px;text-align:center">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Diferencia</div>
-          <div style="font-size:18px;font-weight:700;color:${(r.hsFijas-r.hsRecibo)<0?'var(--red)':r.hsFijas>r.hsRecibo?'var(--green)':'var(--text3)'}">${(r.hsFijas-r.hsRecibo)>=0?'+':''}${(r.hsFijas-r.hsRecibo).toFixed(0)}</div>
+          <div style="font-size:18px;font-weight:700;color:${diff<0?'var(--red)':diff>0?'var(--green)':'var(--text3)'}">${diff>=0?'+':''}${diff.toFixed(0)}</div>
         </div>
       </div>
       ${r.srvs.length > 0 ? `
@@ -2719,6 +2726,11 @@ function filtrarRepOp() {
       ` : `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicios asignados</div>`}
     </div>`;
   }).join('');
+  } catch(e) {
+    console.error('filtrarRepOp error:', e);
+    const cont2 = document.getElementById('rp-op-lista');
+    if (cont2) cont2.innerHTML = `<div class="card-section"><div style="color:var(--red);padding:16px">Error al mostrar resultados. Intentá de nuevo.</div></div>`;
+  }
 }
 
 // ── REPORTE 3: POR SERVICIO ──
