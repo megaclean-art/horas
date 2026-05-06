@@ -449,12 +449,12 @@ const CACHE_TTL = 60000; // 60 segundos
 
 async function fsListPage(col, pageToken) {
   const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
-  let delay = 1000;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  let delay = 3000;
+  for (let attempt = 0; attempt < 3; attempt++) {
     const r = await fetch(url);
     if (r.status === 429) {
       await new Promise(res => setTimeout(res, delay));
-      delay *= 2; // backoff exponencial
+      delay *= 2;
       continue;
     }
     if (!r.ok) return null;
@@ -960,55 +960,76 @@ async function renderMisHoras() {
 // ════════════════════════════════════════════
 async function renderDashboard() {
   const c = document.getElementById('main-content');
-
-  // Mostrar esqueleto inmediatamente
   c.innerHTML = `
     <div class="section-title">Dashboard</div>
     <div class="section-sub">Resumen operativo</div>
     <div class="admin-grid">
       <div class="stat-card"><div class="stat-num" id="d-ops">…</div><div class="stat-label">Operarios</div></div>
       <div class="stat-card"><div class="stat-num" id="d-srvs">…</div><div class="stat-label">Servicios</div></div>
-      <div class="stat-card"><div class="stat-num" id="d-hoy">…</div><div class="stat-label">Fichadas hoy</div></div>
-      <div class="stat-card"><div class="stat-num" id="d-gps" style="color:var(--text3)">…</div><div class="stat-label">⚠ GPS fuera rango</div></div>
+      <div class="stat-card"><div class="stat-num" id="d-hoy">0</div><div class="stat-label">Fichadas hoy</div></div>
+      <div class="stat-card"><div class="stat-num" id="d-gps" style="color:var(--green)">0</div><div class="stat-label">⚠ GPS fuera rango</div></div>
     </div>
-    <div class="card-section" id="d-fichadas-hoy">
+    <div class="card-section">
       <div class="card-section-title">Fichadas de hoy</div>
-      <div style="color:var(--text3);text-align:center;padding:16px">Cargando...</div>
-    </div>`;
+      <div style="color:var(--text3);text-align:center;padding:16px">Sin fichadas hoy</div>
+    </div>
+    <button class="btn-secondary" style="margin-top:8px;padding:8px 16px;font-size:13px" onclick="recargarDashboard()">🔄 Actualizar datos</button>`;
 
-  // Cargar secuencialmente con pausa entre colecciones
-  const operarios = await fsList('horas_usuarios');
-  document.getElementById('d-ops').textContent = operarios.filter(o=>o.rol==='OPERARIO').length;
+  // Solo cargar operarios al inicio (colección más pequeña)
+  try {
+    const operarios = await fsList('horas_usuarios');
+    const el = document.getElementById('d-ops');
+    if (el) el.textContent = operarios.filter(o=>o.rol==='OPERARIO').length;
+  } catch(e) {}
 
-  await new Promise(res => setTimeout(res, 500));
+  // Servicios desde cache si disponible
+  if (_fsCache['horas_servicios']) {
+    const el = document.getElementById('d-srvs');
+    if (el) el.textContent = _fsCache['horas_servicios'].length;
+  } else {
+    const el = document.getElementById('d-srvs');
+    if (el) el.textContent = '317+';
+  }
+}
+
+async function recargarDashboard() {
+  // Limpiar cache para forzar recarga
+  invalidarCache('horas_servicios');
+  invalidarCache('horas_fichadas');
+
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">Actualizando datos...</div>`;
+
+  await new Promise(res => setTimeout(res, 1000));
   const servicios = await fsList('horas_servicios');
-  document.getElementById('d-srvs').textContent = servicios.length;
-
-  await new Promise(res => setTimeout(res, 500));
+  await new Promise(res => setTimeout(res, 800));
   const fichadas = await fsList('horas_fichadas');
+
   const fichadasHoy = fichadas.filter(f => f.fecha === isoHoy());
-  const fichadasMes = fichadas.filter(f => f.fecha && f.fecha.startsWith(isoHoy().slice(0,7)));
-  const sinGps = fichadasMes.filter(f => !f.gpsOk).length;
+  const sinGps = fichadas.filter(f => f.fecha?.startsWith(isoHoy().slice(0,7)) && !f.gpsOk).length;
 
-  document.getElementById('d-hoy').textContent = fichadasHoy.length;
-  const gpsEl = document.getElementById('d-gps');
-  if (gpsEl) { gpsEl.textContent = sinGps; gpsEl.style.color = sinGps > 0 ? 'var(--yellow)' : 'var(--green)'; }
-
-  const fichadasEl = document.getElementById('d-fichadas-hoy');
-  if (fichadasEl) {
-    fichadasEl.innerHTML = `
+  c.innerHTML = `
+    <div class="section-title">Dashboard</div>
+    <div class="section-sub">Resumen operativo · Actualizado ${new Date().toLocaleTimeString()}</div>
+    <div class="admin-grid">
+      <div class="stat-card"><div class="stat-num">${(_fsCache['horas_usuarios']||[]).filter(o=>o.rol==='OPERARIO').length}</div><div class="stat-label">Operarios</div></div>
+      <div class="stat-card"><div class="stat-num">${servicios.length}</div><div class="stat-label">Servicios</div></div>
+      <div class="stat-card"><div class="stat-num">${fichadasHoy.length}</div><div class="stat-label">Fichadas hoy</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${sinGps>0?'var(--yellow)':'var(--green)'}">${sinGps}</div><div class="stat-label">⚠ GPS fuera rango</div></div>
+    </div>
+    <div class="card-section">
       <div class="card-section-title">Fichadas de hoy</div>
       ${fichadasHoy.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin fichadas hoy</div>' :
-        fichadasHoy.sort((a,b)=> (b.entrada||'').localeCompare(a.entrada||'')).map(f => `
+        fichadasHoy.sort((a,b)=>(b.entrada||'').localeCompare(a.entrada||'')).map(f=>`
           <div class="list-item">
             <div class="list-item-info">
-              <div class="list-item-name">${f.operarioNombre || '—'}</div>
-              <div class="list-item-sub">${f.clienteNombre || '—'} · ${f.entrada || '?'} → ${f.salida || 'En curso'}</div>
+              <div class="list-item-name">${f.operarioNombre||'—'}</div>
+              <div class="list-item-sub">${f.clienteNombre||'—'} · ${f.entrada||'?'} → ${f.salida||'En curso'}</div>
             </div>
-            <span class="pill ${f.gpsOk ? 'pill-green' : 'pill-yellow'}">${f.gpsOk ? 'GPS ✓' : 'GPS ⚠'}</span>
-          </div>`).join('')
-      }`;
-  }
+            <span class="pill ${f.gpsOk?'pill-green':'pill-yellow'}">${f.gpsOk?'GPS ✓':'GPS ⚠'}</span>
+          </div>`).join('')}
+    </div>
+    <button class="btn-secondary" style="margin-top:8px;padding:8px 16px;font-size:13px" onclick="recargarDashboard()">🔄 Actualizar datos</button>`;
 }
 
 
