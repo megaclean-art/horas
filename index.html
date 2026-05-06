@@ -32,7 +32,7 @@ input { padding:10px; width:100%; margin-top:10px; }
 <div id="app" style="display:none;">
   <h2>Gestión de Horas</h2>
   <button onclick="logout()">Cerrar sesión</button>
-  <button class="btn btn-ver" onclick="verResumen()">Ver resumen</button>
+  <button class="btn btn-ver" onclick="verResumen()">Ver resumen completo</button>
   <div id="resumen"></div>
 </div>
 
@@ -54,9 +54,8 @@ const db = firebase.firestore();
 
 let OPERARIO_ID = null;
 
-// ================= LOGIN =================
+// LOGIN
 async function login() {
-
   const input = document.getElementById("usuario").value.toLowerCase().trim();
   if (!input) return alert("Ingresá tu apellido");
 
@@ -70,10 +69,7 @@ async function login() {
     }
   });
 
-  if (!encontrado) {
-    alert("Operario no encontrado");
-    return;
-  }
+  if (!encontrado) return alert("Operario no encontrado");
 
   localStorage.setItem("operario_id", encontrado);
   iniciarApp();
@@ -86,7 +82,6 @@ function logout() {
 
 function iniciarApp() {
   OPERARIO_ID = localStorage.getItem("operario_id");
-
   if (!OPERARIO_ID) return;
 
   document.getElementById("login").style.display = "none";
@@ -100,43 +95,64 @@ async function verResumen() {
   const mes = hoy.getMonth();
   const año = hoy.getFullYear();
 
-  // 🔥 HORAS RECIBO
+  // 🔥 RECIBO
   const userDoc = await db.collection("horas_usuarios").doc(OPERARIO_ID).get();
-  const horasRecibo = userDoc.exists ? userDoc.data().horasRecibo || 0 : 0;
+  const horasRecibo = userDoc.data().horasRecibo || 0;
 
-  // 🔥 HORAS TRABAJADAS (para después usar en variables)
-  const fichajes = await db.collection("fichajes")
+  // 🔥 SERVICIOS
+  const serviciosSnap = await db.collection("horas_servicios").get();
+
+  let mapaServicios = {};
+
+  serviciosSnap.forEach(doc => {
+    mapaServicios[doc.id] = doc.data();
+  });
+
+  // 🔥 FICHAJES
+  const fichajesSnap = await db.collection("fichajes")
     .where("operario","==",OPERARIO_ID)
     .get();
 
-  let totalMs = 0;
   let entrada = null;
+  let fijoMs = 0;
+  let variableMs = 0;
 
-  fichajes.forEach(doc => {
+  fichajesSnap.forEach(doc => {
+
     const d = doc.data();
-
     if (!d.timestamp) return;
 
     const fecha = new Date(d.timestamp);
 
     if (fecha.getMonth() !== mes || fecha.getFullYear() !== año) return;
 
-    if (d.tipo === "entrada") entrada = d.timestamp;
+    if (d.tipo === "entrada") {
+      entrada = { t: d.timestamp, servicio: d.servicio };
+    }
 
     if (d.tipo === "salida" && entrada) {
-      totalMs += (d.timestamp - entrada);
+
+      const duracion = d.timestamp - entrada.t;
+
+      const servicioData = mapaServicios[entrada.servicio];
+
+      if (servicioData && servicioData.tipo === "FIJO") {
+        fijoMs += duracion;
+      } else {
+        variableMs += duracion;
+      }
+
       entrada = null;
     }
   });
 
-  const horasTrabajadas = totalMs / 1000 / 60 / 60;
+  const horasFijoTrabajadas = fijoMs / 1000 / 60 / 60;
+  const horasVariables = variableMs / 1000 / 60 / 60;
 
-  // 🔥 HORAS OBJETIVO (FIJO)
-  const servicios = await db.collection("horas_servicios").get();
-
+  // 🔥 OBJETIVO FIJO
   let horasObjetivo = 0;
 
-  servicios.forEach(doc => {
+  serviciosSnap.forEach(doc => {
 
     const data = doc.data();
 
@@ -151,24 +167,28 @@ async function verResumen() {
       const horasDia = (h2 + m2/60) - (h1 + m1/60);
       const diasSemana = data.dias.length;
 
-      const horasSemanales = horasDia * diasSemana;
-
-      horasObjetivo += horasSemanales * 4;
+      horasObjetivo += horasDia * diasSemana * 4;
     }
   });
 
-  // 💣 DIFERENCIA CORRECTA (FIJO vs RECIBO)
-  const diferencia = horasObjetivo - horasRecibo;
+  const totalTrabajado = horasFijoTrabajadas + horasVariables;
+
+  const diferencia = totalTrabajado - horasRecibo;
 
   document.getElementById("resumen").innerHTML = `
     <div class="card">
       <b>Operario:</b> ${OPERARIO_ID}<br><br>
 
-      <b>Horas objetivo (FIJO):</b> ${horasObjetivo.toFixed(1)}<br>
-      <b>Horas recibo:</b> ${horasRecibo}<br><br>
+      <b>FIJO objetivo:</b> ${horasObjetivo.toFixed(1)}<br>
+      <b>FIJO trabajado:</b> ${horasFijoTrabajadas.toFixed(1)}<br><br>
 
-      <b>Diferencia:</b> ${diferencia.toFixed(1)} hs<br>
-      <b>${diferencia >= 0 ? "OK / PAGAR EXTRA SI CORRESPONDE" : "DEBE HORAS"}</b>
+      <b>VARIABLE:</b> ${horasVariables.toFixed(1)}<br><br>
+
+      <b>TOTAL trabajado:</b> ${totalTrabajado.toFixed(1)}<br>
+      <b>RECIBO:</b> ${horasRecibo}<br><br>
+
+      <b>DIFERENCIA FINAL:</b> ${diferencia.toFixed(1)} hs<br>
+      <b>${diferencia >= 0 ? "PAGAR HORAS EXTRA" : "DEBE HORAS"}</b>
     </div>
   `;
 }
