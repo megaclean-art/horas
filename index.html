@@ -1444,6 +1444,8 @@ async function guardarServicio(id = '') {
   };
 
   if (id) {
+    // DELETE + CREATE para garantizar que arrays y campos se actualicen correctamente
+    await fsDelete('horas_servicios', id);
     await fsSave('horas_servicios', id, data);
     toast(`✓ ${cliente} actualizado`, 'ok');
   } else {
@@ -2021,7 +2023,11 @@ async function guardarCobertura(id = '') {
   if (!id) data.fechaCreacion = isoHoy();
 
   if (id) {
-    delete data.estado;
+    // Preservar estado actual antes de recrear
+    const cobActual = await fsGet('horas_coberturas', id);
+    data.estado = cobActual?.estado || 'ACTIVA';
+    data.fechaCreacion = cobActual?.fechaCreacion || isoHoy();
+    await fsDelete('horas_coberturas', id);
     await fsSave('horas_coberturas', id, data);
     toast(`✓ Cobertura actualizada`, 'ok');
   } else {
@@ -2644,12 +2650,17 @@ function filtrarRepOp() {
   if (!cont) return;
   if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`; return; }
 
-  cont.innerHTML = lista.map(r => `
+  cont.innerHTML = lista.map(r => {
+    const nombre = (r.op.nombre||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+    const legajo = r.op.legajo||'—';
+    const tipo = r.op.tipo||'FIJO';
+    const supervisor = (r.op.supervisor||'').replace(/'/g,'&#39;');
+    return `
     <div class="card-section" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
         <div>
-          <div style="font-family:var(--font-display);font-size:18px;font-weight:700">${r.op.nombre}</div>
-          <div style="font-size:12px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · ${r.op.tipo||'FIJO'} · ${r.op.supervisor||''}</div>
+          <div style="font-family:var(--font-display);font-size:18px;font-weight:700">${nombre}</div>
+          <div style="font-size:12px;color:var(--text3)">Leg. ${legajo} · ${tipo} · ${supervisor}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:var(--text3)">Recibo</div>
@@ -2672,9 +2683,10 @@ function filtrarRepOp() {
       </div>
       ${r.srvs.length > 0 ? `
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Servicios asignados (${r.srvs.length})</div>
-      ${r.srvs.map(s=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border)">🏢 ${s.cliente} · ${(s.dias||[]).join('-')} · ${s.horaInicio||''}–${s.horaFin||''} · ${s.horasContratadas||0}hs</div>`).join('')}
+      ${r.srvs.map(s=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border)">🏢 ${(s.cliente||'').replace(/'/g,'&#39;')} · ${(s.dias||[]).join('-')} · ${s.horaInicio||''}–${s.horaFin||''} · ${s.horasContratadas||0}hs</div>`).join('')}
       ` : `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicios asignados</div>`}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // ── REPORTE 3: POR SERVICIO ──
