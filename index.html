@@ -103,18 +103,34 @@ async function verResumen() {
   const serviciosSnap = await db.collection("horas_servicios").get();
 
   let mapaServicios = {};
+  let horasObjetivo = 0;
 
   serviciosSnap.forEach(doc => {
-    mapaServicios[doc.id] = doc.data();
+
+    const data = doc.data();
+    mapaServicios[doc.id] = data;
+
+    if (!data.operarios || !data.operarios.includes(OPERARIO_ID)) return;
+    if (data.tipo !== "FIJO") return;
+
+    if (data.horaInicio && data.horaFin && data.dias) {
+
+      const [h1, m1] = data.horaInicio.split(":").map(Number);
+      const [h2, m2] = data.horaFin.split(":").map(Number);
+
+      const horasDia = (h2 + m2/60) - (h1 + m1/60);
+      const diasSemana = data.dias.length;
+
+      horasObjetivo += horasDia * diasSemana * 4;
+    }
   });
 
-  // 🔥 FICHAJES
+  // 🔥 FICHAJES (VARIABLES)
   const fichajesSnap = await db.collection("fichajes")
     .where("operario","==",OPERARIO_ID)
     .get();
 
   let entrada = null;
-  let fijoMs = 0;
   let variableMs = 0;
 
   fichajesSnap.forEach(doc => {
@@ -136,9 +152,7 @@ async function verResumen() {
 
       const servicioData = mapaServicios[entrada.servicio];
 
-      if (servicioData && servicioData.tipo === "FIJO") {
-        fijoMs += duracion;
-      } else {
+      if (!servicioData || servicioData.tipo !== "FIJO") {
         variableMs += duracion;
       }
 
@@ -146,32 +160,10 @@ async function verResumen() {
     }
   });
 
-  const horasFijoTrabajadas = fijoMs / 1000 / 60 / 60;
   const horasVariables = variableMs / 1000 / 60 / 60;
 
-  // 🔥 OBJETIVO FIJO
-  let horasObjetivo = 0;
-
-  serviciosSnap.forEach(doc => {
-
-    const data = doc.data();
-
-    if (!data.operarios || !data.operarios.includes(OPERARIO_ID)) return;
-    if (data.tipo !== "FIJO") return;
-
-    if (data.horaInicio && data.horaFin && data.dias) {
-
-      const [h1, m1] = data.horaInicio.split(":").map(Number);
-      const [h2, m2] = data.horaFin.split(":").map(Number);
-
-      const horasDia = (h2 + m2/60) - (h1 + m1/60);
-      const diasSemana = data.dias.length;
-
-      horasObjetivo += horasDia * diasSemana * 4;
-    }
-  });
-
-  const totalTrabajado = horasFijoTrabajadas + horasVariables;
+  // 💣 TOTAL CORRECTO
+  const totalTrabajado = horasObjetivo + horasVariables;
 
   const diferencia = totalTrabajado - horasRecibo;
 
@@ -180,8 +172,6 @@ async function verResumen() {
       <b>Operario:</b> ${OPERARIO_ID}<br><br>
 
       <b>FIJO objetivo:</b> ${horasObjetivo.toFixed(1)}<br>
-      <b>FIJO trabajado:</b> ${horasFijoTrabajadas.toFixed(1)}<br><br>
-
       <b>VARIABLE:</b> ${horasVariables.toFixed(1)}<br><br>
 
       <b>TOTAL trabajado:</b> ${totalTrabajado.toFixed(1)}<br>
