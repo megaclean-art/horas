@@ -5,23 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MegaClean Gestión</title>
 
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1a8fcb">
-
 <style>
 body { font-family: Arial; background:#f4f7fa; }
 .container { max-width:600px; margin:auto; padding:20px; }
-.btn { padding:12px; margin:5px 0; width:100%; border:none; border-radius:8px; }
+.card { background:#fff; padding:15px; border-radius:10px; margin-bottom:10px; }
+.btn { padding:12px; margin-top:10px; width:100%; border:none; border-radius:8px; }
 .btn-entrar { background:#27a85a; color:#fff; }
 .btn-salir { background:#d63d4a; color:#fff; }
-.card { background:#fff; padding:15px; border-radius:10px; margin-bottom:10px; }
-.estado {
-  padding:5px;
-  border-radius:5px;
-  font-size:12px;
-  display:inline-block;
-  margin-top:5px;
-}
+.estado { padding:5px; border-radius:5px; font-size:12px; display:inline-block; }
 .activo { background:#27a85a; color:#fff; }
 .inactivo { background:#999; color:#fff; }
 </style>
@@ -31,73 +22,72 @@ body { font-family: Arial; background:#f4f7fa; }
 
 <div class="container">
   <h2>Gestión de Horas</h2>
-  <div id="servicios">Cargando datos...</div>
+  <div id="servicios">Cargando...</div>
 </div>
 
-<!-- 🔥 Firebase compat -->
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
 
 <script>
 
-// 🔥 CONFIG REAL
 const firebaseConfig = {
   apiKey: "AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng",
   authDomain: "mega-clean-12f17.firebaseapp.com",
   projectId: "mega-clean-12f17",
-  storageBucket: "mega-clean-12f17.firebasestorage.app",
-  messagingSenderId: "446418900871",
-  appId: "1:446418900871:web:b178a54ceeb66944882522"
 };
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// ================= ESTADO =================
+// 🔥 CAMBIÁ ESTO PARA PROBAR OTRO OPERARIO
+const OPERARIO_ACTUAL = "carabajal";
+
 let estadoOperario = {};
 
-// ================= GPS =================
-function obtenerUbicacion() {
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-      }),
-      () => resolve({ lat: -31.42, lng: -64.18 })
-    );
-  });
+// ================= DÍA =================
+function obtenerDia() {
+  const dias = ["DOM","LUN","MAR","MIE","JUE","VIE","SAB"];
+  return dias[new Date().getDay()];
 }
 
-// ================= CARGA FIREBASE =================
+// ================= CARGA =================
 async function cargarServicios() {
 
-  try {
+  const diaHoy = obtenerDia();
 
-    const doc = await db.collection("config").doc("clients").get();
+  const snapshot = await db.collection("horas_servicios").get();
+
+  let servicios = [];
+
+  snapshot.forEach(doc => {
     const data = doc.data();
 
-    if (!data || !data.list) {
-      document.getElementById("servicios").innerHTML = "No hay datos";
-      return;
-    }
+    // 🔥 FILTRO OPERARIO (CLAVE)
+    if (!doc.id.toLowerCase().includes(OPERARIO_ACTUAL.toLowerCase())) return;
 
-    // 🔥 tus clientes reales
-    const clientes = data.list;
+    // 🔥 FILTRO DÍA
+    if (!data.dias || !data.dias.includes(diaHoy)) return;
 
-    // 👇 por ahora mostramos primeros 10 (para no romper)
-    renderServicios(clientes.slice(0, 10));
+    servicios.push({
+      id: doc.id,
+      cliente: data.cliente,
+      direccion: data.direccion
+    });
+  });
 
-  } catch (error) {
-    console.error(error);
-    document.getElementById("servicios").innerHTML = "Error cargando datos";
-  }
+  renderServicios(servicios);
 }
 
 // ================= RENDER =================
 function renderServicios(servicios) {
+
   const cont = document.getElementById("servicios");
   cont.innerHTML = "";
+
+  if (servicios.length === 0) {
+    cont.innerHTML = "No tenés servicios hoy";
+    return;
+  }
 
   servicios.forEach(s => {
 
@@ -107,11 +97,11 @@ function renderServicios(servicios) {
     div.className = "card";
 
     div.innerHTML = `
-      <b>${s.name}</b><br>
-      <small>${s.address}</small><br>
+      <b>${s.cliente}</b><br>
+      <small>${s.direccion}</small><br>
       <span class="estado ${trabajando ? 'activo' : 'inactivo'}">
         ${trabajando ? 'Trabajando' : 'No activo'}
-      </span><br><br>
+      </span><br>
 
       ${!trabajando ? `
         <button class="btn btn-entrar" onclick="fichar('${s.id}','entrada')">Entrar</button>
@@ -127,39 +117,24 @@ function renderServicios(servicios) {
 }
 
 // ================= FICHAR =================
-async function fichar(servicioId, tipo) {
-
-  const ubicacion = await obtenerUbicacion();
+function fichar(id, tipo) {
 
   if (tipo === "entrada") {
-
-    if (estadoOperario[servicioId]) {
+    if (estadoOperario[id]) {
       alert("Ya estás trabajando");
       return;
     }
-
-    estadoOperario[servicioId] = true;
-
+    estadoOperario[id] = true;
   } else {
-
-    if (!estadoOperario[servicioId]) {
+    if (!estadoOperario[id]) {
       alert("No podés salir sin entrar");
       return;
     }
-
-    estadoOperario[servicioId] = false;
+    estadoOperario[id] = false;
   }
 
   alert("Fichada ✔");
-
-  console.log({
-    servicioId,
-    tipo,
-    ubicacion,
-    hora: new Date()
-  });
-
-  renderServicios(document.querySelectorAll(".card"));
+  cargarServicios();
 }
 
 // ================= INIT =================
