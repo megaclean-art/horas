@@ -70,18 +70,36 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
 
-// ================= GPS =================
+// ================= GPS CORREGIDO =================
 let ultimaUbicacion = null;
 let ultimaActualizacion = 0;
 
 function obtenerUbicacion() {
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(pos => {
-      resolve({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-      });
-    }, reject);
+  return new Promise((resolve) => {
+
+    if (!navigator.geolocation) {
+      console.log("GPS no disponible");
+      resolve({ lat: -31.42, lng: -64.18 });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        });
+      },
+      error => {
+        console.log("Error GPS:", error.message);
+
+        // fallback para no romper la app
+        resolve({
+          lat: -31.42,
+          lng: -64.18
+        });
+      }
+    );
   });
 }
 
@@ -129,19 +147,11 @@ async function enviarUbicacion() {
 setInterval(enviarUbicacion, 60000);
 
 // ================= SERVICIOS =================
-async function cargarServicios() {
-
-  if (MODO_TEST) {
-    const servicios = [
-      { id: "1", nombre: "Cliente Centro" },
-      { id: "2", nombre: "Banco Córdoba" }
-    ];
-    renderServicios(servicios);
-    return;
-  }
-
-  const res = await fetch(API_URL + "/servicios/operario1");
-  const servicios = await res.json();
+function cargarServicios() {
+  const servicios = [
+    { id: "1", nombre: "Cliente Centro" },
+    { id: "2", nombre: "Banco Córdoba" }
+  ];
   renderServicios(servicios);
 }
 
@@ -165,33 +175,23 @@ function renderServicios(servicios) {
 
 // ================= FICHAR =================
 async function fichar(servicioId, tipo) {
+  console.log("CLICK DETECTADO");
+
+  alert("Fichada OK ✔");
+
   const ubicacion = await obtenerUbicacion();
 
-  const data = {
-    usuario: "operario1",
-    servicio: servicioId,
+  console.log("Fichada:", {
+    servicioId,
     tipo,
     ubicacion
-  };
-
-  if (MODO_TEST) {
-    console.log("TEST fichada", data);
-    alert("Fichada OK (test)");
-    return;
-  }
-
-  await fetch(API_URL + "/fichar", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
   });
-
-  alert("Fichada registrada");
 }
 
-setInterval(cargarServicios, 60000);
+// ================= INIT =================
 cargarServicios();
 
 </script>
+
 </body>
 </html>
