@@ -1132,33 +1132,63 @@ function filtrarServicios() {
     return ops.includes(filtroOp);
   });
 
+  // ── AGRUPAR por código + horario ──
+  // Clave de agrupación: codigo|horaInicio|horaFin|dias_ordenados
+  const grupos = {};
+  for (const s of lista) {
+    const diasKey = (s.dias||[]).slice().sort().join('-');
+    const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
+    if (!grupos[clave]) {
+      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...(Array.isArray(s.operarios)?s.operarios:(s.operarios?[s.operarios]:[])) ] };
+    } else {
+      // Agregar operarios del duplicado al grupo
+      const opsNuevos = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+      for (const op of opsNuevos) {
+        if (!grupos[clave]._operariosAll.includes(op)) grupos[clave]._operariosAll.push(op);
+      }
+      grupos[clave]._ids.push(s._id);
+    }
+  }
+
+  const listaAgrupada = Object.values(grupos);
+
   const cont = document.getElementById('srv-lista');
   if (!cont) return;
 
-  if (lista.length === 0) {
+  if (listaAgrupada.length === 0) {
     cont.innerHTML = `<div class="card-section"><div style="color:var(--text3);text-align:center;padding:20px">Sin resultados</div></div>`;
     return;
   }
 
   cont.innerHTML = `<div class="card-section">
-    <div class="card-section-title">Mostrando ${lista.length} de ${_serviciosCache.length} servicios</div>
-    ${lista.map(s => {
-      const ops = (Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []))
-        .map(id => _operariosCache.find(o => o._id === id)?.nombre || id).filter(Boolean).join(', ');
+    <div class="card-section-title">Mostrando ${listaAgrupada.length} servicios (${lista.length} registros)</div>
+    ${listaAgrupada.map(s => {
+      const ops = s._operariosAll
+        .map(id => _operariosCache.find(o => o._id === id)?.nombre || id)
+        .filter(Boolean);
       const supLabel = s.supervisor || (s.idSupervisor ? `Sup. ${s.idSupervisor}` : '');
+      // Para editar/eliminar usamos el primer ID del grupo
+      const primerIdStr = s._ids[0];
+      // Si el grupo tiene múltiples IDs, mostrar badge
+      const multiTag = s._ids.length > 1 ? `<span style="background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px">${s._ids.length} registros</span>` : '';
       return `<div class="list-item">
         <div class="list-item-info" style="padding-right:8px">
-          <div class="list-item-name">${s.cliente || '—'} ${s.codigo ? `<span style="color:var(--text3);font-size:11px;font-weight:400">#${s.codigo}</span>` : ''}</div>
+          <div class="list-item-name">${s.cliente || '—'} ${s.codigo ? `<span style="color:var(--text3);font-size:11px;font-weight:400">#${s.codigo}</span>` : ''}${multiTag}</div>
           <div class="list-item-sub">📍 ${s.direccion || '<em style="color:var(--text3)">Sin dirección</em>'}</div>
           <div class="list-item-sub">
             ${(s.dias||[]).join(' · ')} &nbsp;·&nbsp; ${s.horaInicio||'--:--'} – ${s.horaFin||'--:--'} &nbsp;·&nbsp; ${s.horasContratadas||0}hs
             ${supLabel ? `&nbsp;·&nbsp; <span style="color:var(--text3)">🏷 ${supLabel}</span>` : ''}
           </div>
-          <div class="list-item-sub" style="color:var(--accent)">👷 ${ops || '<em style="color:var(--text3)">Sin asignar</em>'}</div>
+          <div style="margin-top:4px">
+            ${ops.length === 0
+              ? `<em style="font-size:12px;color:var(--text3)">Sin asignar</em>`
+              : ops.map(n => `<div style="font-size:12px;color:var(--accent);padding:2px 0">👷 ${n}</div>`).join('')
+            }
+          </div>
         </div>
         <div class="list-item-actions" style="flex-shrink:0">
-          <button class="btn-icon edit" title="Editar" onclick="modalServicio('${s._id}')">✏️</button>
-          <button class="btn-icon" title="Eliminar" onclick="eliminarServicio('${s._id}','${s.cliente}')">🗑</button>
+          <button class="btn-icon edit" title="Editar" onclick="modalServicio('${primerIdStr}')">✏️</button>
+          <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>
         </div>
       </div>`;
     }).join('')}
@@ -1426,6 +1456,19 @@ function filtrarOpsModal() {
     const nombre = row.querySelector('div[style*="font-weight"]')?.textContent?.toLowerCase() || '';
     row.style.display = nombre.includes(q) ? '' : 'none';
   });
+}
+
+async function eliminarServicioGrupo(ids, nombre) {
+  const msg = ids.length > 1
+    ? `¿Eliminar el servicio "${nombre}" y sus ${ids.length} registros asociados?\nEsta acción no se puede deshacer.`
+    : `¿Eliminar el servicio "${nombre}"?\nEsta acción no se puede deshacer.`;
+  if (!confirm(msg)) return;
+  for (const id of ids) {
+    await fsDelete('horas_servicios', id);
+  }
+  _serviciosCache = _serviciosCache.filter(s => !ids.includes(s._id));
+  filtrarServicios();
+  toast(`${nombre} eliminado`, 'ok');
 }
 
 async function eliminarServicio(id, nombre) {
