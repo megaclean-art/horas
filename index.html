@@ -433,13 +433,18 @@ async function fsGet(col, id) {
   return fromFS(await r.json());
 }
 
-async function fsList(col, filter) {
-  let url = `${API}/${col}?pageSize=500`;
-  const r = await fetch(url);
-  if (!r.ok) return [];
-  const data = await r.json();
-  if (!data.documents) return [];
-  return data.documents.map(fromFS);
+async function fsList(col) {
+  let allDocs = [];
+  let pageToken = '';
+  do {
+    const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + pageToken : ''}`;
+    const r = await fetch(url);
+    if (!r.ok) break;
+    const data = await r.json();
+    if (data.documents) allDocs = allDocs.concat(data.documents.map(fromFS));
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return allDocs;
 }
 
 async function fsSave(col, id, data) {
