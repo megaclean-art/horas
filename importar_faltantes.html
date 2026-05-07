@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>MegaClean · Importar Operarios Faltantes</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f4f7fa;color:#1a2533;padding:24px}
+h1{color:#1a8fcb;font-size:22px;margin-bottom:4px}
+.sub{color:#7a8899;font-size:13px;margin-bottom:20px}
+.card{background:#fff;border:1.5px solid #dce3ed;border-radius:14px;padding:20px;margin-bottom:16px;max-width:640px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+.stat{font-size:36px;font-weight:900;color:#1a8fcb}
+.stat-label{font-size:11px;color:#8fa3b8;text-transform:uppercase;letter-spacing:1px;margin-top:2px}
+.btn{background:linear-gradient(135deg,#1a8fcb,#0e6fa0);color:#fff;border:none;border-radius:10px;padding:13px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;max-width:640px;display:block;margin-bottom:10px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.progress{background:#dce3ed;border-radius:4px;height:6px;max-width:640px;margin-bottom:12px;overflow:hidden}
+.progress-bar{height:100%;background:#1a8fcb;transition:width .2s;width:0%;border-radius:4px}
+.log{background:#1a2533;border-radius:10px;padding:14px;height:340px;overflow-y:auto;font-family:monospace;font-size:12px;max-width:640px}
+.ok{color:#27a85a}.err{color:#d63d4a}.info{color:#1a8fcb}.warn{color:#e07b2a}
+</style>
+</head>
+<body>
+<h1>MEGACLEAN · IMPORTAR OPERARIOS FALTANTES</h1>
+<div class="sub">Agrega a Firestore los operarios que están en el Excel pero no en la app · Total: 145 operarios</div>
+
+<div class="card">
+  <div class="grid">
+    <div><div class="stat" id="s-total">—</div><div class="stat-label">En Firestore</div></div>
+    <div><div class="stat" id="s-faltantes" style="color:#e07b2a">—</div><div class="stat-label">Faltantes</div></div>
+    <div><div class="stat" id="s-ok" style="color:#27a85a">0</div><div class="stat-label">Agregados</div></div>
+    <div><div class="stat" id="s-err" style="color:#d63d4a">0</div><div class="stat-label">Errores</div></div>
+  </div>
+</div>
+
+<div class="progress"><div class="progress-bar" id="pb"></div></div>
+<button class="btn" id="btn" onclick="importar()">▶ VERIFICAR Y AGREGAR FALTANTES</button>
+<div class="log" id="log"></div>
+
+<script>
+const API = 'https://firestore.googleapis.com/v1/projects/mega-clean-12f17/databases/(default)/documents';
+const EXCEL_OPS = [{"legajo": "00064", "nombre": "ACOSTA, LORENA MACARENA", "pass": "064", "horas": 176}, {"legajo": "238", "nombre": "ACUÑA, MARIELA JUDY", "pass": "238", "horas": 176}, {"legajo": "1216", "nombre": "AGUIRRE, FIAMA CELESTE", "pass": "216", "horas": 100}, {"legajo": "747", "nombre": "AGUIRRE, YAMILA SOLEDAD", "pass": "747", "horas": 176}, {"legajo": "733", "nombre": "ALANIE, MONICA DANIELA", "pass": "733", "horas": 176}, {"legajo": "00128", "nombre": "ALDERETE, VANESA ALEJANDRA", "pass": "128", "horas": 160}, {"legajo": "44", "nombre": "ALI, ROBERTO CARLOS", "pass": "044", "horas": 176}, {"legajo": "484", "nombre": "ALTAMIRANO RUEDA, GABRIEL ALEJANDRO", "pass": "484", "horas": 176}, {"legajo": "474", "nombre": "ANDRADA, GASTON DARIO", "pass": "474", "horas": 160}, {"legajo": "269", "nombre": "ARIAS, ERIKA ELENA GISELLE", "pass": "269", "horas": 176}, {"legajo": "1030", "nombre": "ARIAS, LAUTARO FABRIZIO", "pass": "030", "horas": 176}, {"legajo": "00074", "nombre": "ARMESTO, ASTRID NOEMI", "pass": "074", "horas": 80}, {"legajo": "1059", "nombre": "ARROYO, LAURA SOLEDAD", "pass": "059", "horas": 160}, {"legajo": "843", "nombre": "ARTAZA, VANESA BELEN", "pass": "843", "horas": 176}, {"legajo": "420", "nombre": "BAIGORRIA, LAURA SOLEDAD", "pass": "420", "horas": 176}, {"legajo": "1236", "nombre": "BARBOSA, ALEXIS EZEQUIEL", "pass": "236", "horas": 176}, {"legajo": "1078", "nombre": "BARRAZA, JANET YAMILA", "pass": "078", "horas": 160}, {"legajo": "213", "nombre": "BARRERA, YANINA YOHANA", "pass": "213", "horas": 120}, {"legajo": "883", "nombre": "BARRIONUEVO, GRISELDA NOELIA", "pass": "883", "horas": 176}, {"legajo": "1057", "nombre": "BASTIAS, GERARDO EXEQUIEL", "pass": "057", "horas": 176}, {"legajo": "872", "nombre": "BASTIDAS HERNANDEZ, YESSICA ANDREINA", "pass": "872", "horas": 176}, {"legajo": "1185", "nombre": "BIASUTTI, MELISA DANIELA", "pass": "185", "horas": 120}, {"legajo": "548", "nombre": "BRACAMONTE, ESTEBAN RAFAEL", "pass": "548", "horas": 176}, {"legajo": "00078", "nombre": "BUSTOS, PATRICIA ALEJANDRA", "pass": "078", "horas": 176}, {"legajo": "00175", "nombre": "CABELLO, PATRICIA ANDREA", "pass": "175", "horas": 176}, {"legajo": "479", "nombre": "CABRERA, YOHANA DE LOURDES", "pass": "479", "horas": 176}, {"legajo": "1212", "nombre": "CAMPOS, BRUNO JULIAN", "pass": "212", "horas": 120}, {"legajo": "00107", "nombre": "CAPDEVILA, NANCY BEATRIZ", "pass": "107", "horas": 160}, {"legajo": "00060", "nombre": "CARABAJAL, ANDREA FABIANA", "pass": "060", "horas": 144}, {"legajo": "543", "nombre": "CARO, NESTOR VICTOR HUGO", "pass": "543", "horas": 176}, {"legajo": "1278", "nombre": "CARRIZO, CELESTE CATERIN", "pass": "278", "horas": 76}, {"legajo": "00120", "nombre": "CARRIZO, ESTELA EDITH", "pass": "120", "horas": 160}, {"legajo": "1171", "nombre": "CASTILLO, CELESTE ALEJANDRA", "pass": "171", "horas": 100}, {"legajo": "1245", "nombre": "CASTILLO, YAMILA IVANA", "pass": "245", "horas": 160}, {"legajo": "544", "nombre": "CASTRO, JAVIER ENRIQUE", "pass": "544", "horas": 176}, {"legajo": "1060", "nombre": "CASTRO, LAURA MARIELA", "pass": "060", "horas": 76}, {"legajo": "00201", "nombre": "CATALA, VERONICA LORENA", "pass": "201", "horas": 176}, {"legajo": "879", "nombre": "CEBALLOS, ANACLARA", "pass": "879", "horas": 176}, {"legajo": "224", "nombre": "CEPEDA, ALDANA DEL MILAGRO", "pass": "224", "horas": 120}, {"legajo": "1048", "nombre": "CHAVARRIA MARCELO, DAVID EMANUEL", "pass": "048", "horas": 160}, {"legajo": "690", "nombre": "CHAVERO, MARIA EUGENIA", "pass": "690", "horas": 120}, {"legajo": "1226", "nombre": "COLIN LESCANO, TERESA BEATRIZ", "pass": "226", "horas": 160}, {"legajo": "1032", "nombre": "COMOLLO, PAULA VALERIA", "pass": "032", "horas": 176}, {"legajo": "902", "nombre": "CONTINI, MARIA BELEN", "pass": "902", "horas": 176}, {"legajo": "878", "nombre": "CORDOBA, JACQUELINE", "pass": "878", "horas": 176}, {"legajo": "1008", "nombre": "CORTEZ, GUILLERMO KEVIN", "pass": "008", "horas": 176}, {"legajo": "1268", "nombre": "CORTEZ, ROSA DEL VALLE", "pass": "268", "horas": 80}, {"legajo": "00081", "nombre": "CRIADO, ROSANA ESTHER", "pass": "081", "horas": 176}, {"legajo": "633", "nombre": "DAGATTI, CECILIA ESTER", "pass": "633", "horas": 176}, {"legajo": "1277", "nombre": "DAVILA, DANIELA DE LOURDES", "pass": "277", "horas": 76}, {"legajo": "1290", "nombre": "DAVILA, SUSANA MARISEL", "pass": "290", "horas": 76}, {"legajo": "00126", "nombre": "DE ARRASCAETA, SILVANA ADELA", "pass": "126", "horas": 176}, {"legajo": "975", "nombre": "DELGADO, LUIS ALBERTO", "pass": "975", "horas": 176}, {"legajo": "1251", "nombre": "DI PAULA, INDIRA KARIN", "pass": "251", "horas": 76}, {"legajo": "00079", "nombre": "DIAZ, LOURDES YANINA", "pass": "079", "horas": 120}, {"legajo": "00116", "nombre": "DIAZ, MONICA ALEJANDRA", "pass": "116", "horas": 176}, {"legajo": "1109", "nombre": "DOMINGUEZ, MARIA VANESA", "pass": "109", "horas": 76}, {"legajo": "1266", "nombre": "DULCE, ROCIO AYELEN", "pass": "266", "horas": 120}, {"legajo": "407", "nombre": "ETCHEGARAY, PATRICIA VERONICA", "pass": "407", "horas": 176}, {"legajo": "723", "nombre": "FERNANDEZ, CECILIA NOELIA", "pass": "723", "horas": 76}, {"legajo": "308", "nombre": "FERNANDEZ, CRISTINA OFELIA", "pass": "308", "horas": 176}, {"legajo": "327", "nombre": "FERREYRA, FRANCO GABRIEL", "pass": "327", "horas": 176}, {"legajo": "536", "nombre": "FIGUEROA, FERNANDA SOLEDAD", "pass": "536", "horas": 176}, {"legajo": "1260", "nombre": "FONTANA, CINTIA ROMINA", "pass": "260", "horas": 76}, {"legajo": "1010", "nombre": "GARAY, ANGEL EZEQUIEL", "pass": "010", "horas": 176}, {"legajo": "1254", "nombre": "GERZEY, LUDMILA", "pass": "254", "horas": 76}, {"legajo": "936", "nombre": "GODOY, EMA IRENE", "pass": "936", "horas": 160}, {"legajo": "00203", "nombre": "GODOY, SILVANA ALEJANDRA", "pass": "203", "horas": 76}, {"legajo": "994", "nombre": "GOMEZ TERRON, JESICA FERNANDA", "pass": "994", "horas": 160}, {"legajo": "745", "nombre": "GONZALEZ, LORENA MARIELA", "pass": "745", "horas": 176}, {"legajo": "1275", "nombre": "GORDILLO, ALBERTO EMANUEL", "pass": "275", "horas": 76}, {"legajo": "1004", "nombre": "GUDIÑO TULA, SANDRA GRACIELA", "pass": "004", "horas": 176}, {"legajo": "00041", "nombre": "GUERRERO, ANDREA FABIANA", "pass": "041", "horas": 160}, {"legajo": "1128", "nombre": "GUEVARA, VILMA VERONICA", "pass": "128", "horas": 176}, {"legajo": "1096", "nombre": "GUTIERREZ VEGA, FIDELIA", "pass": "096", "horas": 100}, {"legajo": "396", "nombre": "HEREDIA, MARIA CELESTE", "pass": "396", "horas": 176}, {"legajo": "1092", "nombre": "IBARRA, FABRIZIO ALAN IVAN", "pass": "092", "horas": 176}, {"legajo": "661", "nombre": "IGLESIAS, YANINA SOLEDAD", "pass": "661", "horas": 176}, {"legajo": "1249", "nombre": "JAIME, SERGIO AGUSTIN", "pass": "249", "horas": 76}, {"legajo": "1271", "nombre": "JUNCOS SOLIZ, SOFIA VALENTINA", "pass": "271", "horas": 176}, {"legajo": "1207", "nombre": "LEDESMA, GISELA CAROLINA", "pass": "207", "horas": 76}, {"legajo": "862", "nombre": "LEDESMAS, LOURDES NOELIA", "pass": "862", "horas": 176}, {"legajo": "1209", "nombre": "LEDEZMA, MARIA SUSANA", "pass": "209", "horas": 160}, {"legajo": "951", "nombre": "LENCINA, CARINA EUGENIA", "pass": "951", "horas": 176}, {"legajo": "1210", "nombre": "LIVIERO, RICARDO MATIAS", "pass": "210", "horas": 76}, {"legajo": "1041", "nombre": "LOPEZ, ADRIAN EDUARDO", "pass": "041", "horas": 176}, {"legajo": "602", "nombre": "LUDUEÑA, JUAN JOSE", "pass": "602", "horas": 176}, {"legajo": "1284", "nombre": "LUNA, ANA MARCELA", "pass": "284", "horas": 76}, {"legajo": "1289", "nombre": "LUNA, KARINA DEL VALLE", "pass": "289", "horas": 76}, {"legajo": "1282", "nombre": "MANSILLA, LOURDES YAMILA", "pass": "282", "horas": 76}, {"legajo": "1257", "nombre": "MARESTI, ANAHI", "pass": "257", "horas": 120}, {"legajo": "565", "nombre": "MICUDA, JIMENA NATALÍ", "pass": "565", "horas": 76}, {"legajo": "1197", "nombre": "MOLINA, CYNTHIA CAREN", "pass": "197", "horas": 176}, {"legajo": "00042", "nombre": "MOLINA, DANIEL AMERICO", "pass": "042", "horas": 176}, {"legajo": "1141", "nombre": "MOLINA, RAMONA ALEJANDRA", "pass": "141", "horas": 176}, {"legajo": "547", "nombre": "MONTELLANOS, GUSTAVO RAUL", "pass": "547", "horas": 176}, {"legajo": "1151", "nombre": "MORALES, YANINA SOLEDAD DEL CARMEN", "pass": "151", "horas": 176}, {"legajo": "00130", "nombre": "MORENO, MARIA CRISTINA", "pass": "130", "horas": 176}, {"legajo": "1204", "nombre": "MOYANO, ADRIANA PAOLA", "pass": "204", "horas": 120}, {"legajo": "00139", "nombre": "MOYANO, MARIANA SOLEDAD", "pass": "139", "horas": 176}, {"legajo": "1217", "nombre": "MURUA, CRISTIAN ISMAEL", "pass": "217", "horas": 76}, {"legajo": "758", "nombre": "NARVAJA, ANDRES ROBERTO CARLOS", "pass": "758", "horas": 176}, {"legajo": "1227", "nombre": "NAZZETTA, ANTONELLA", "pass": "227", "horas": 160}, {"legajo": "892", "nombre": "NIETO, ALICIA DEL CARMEN", "pass": "892", "horas": 176}, {"legajo": "304", "nombre": "NIVOLI, MARIA PAOLA", "pass": "304", "horas": 176}, {"legajo": "1218", "nombre": "OLIVA, CLAUDIO JOEL", "pass": "218", "horas": 76}, {"legajo": "752", "nombre": "OLIVA, VALERIA DEL CARMEN", "pass": "752", "horas": 160}, {"legajo": "1167", "nombre": "OLMEDO, MARIA DE LOS ANGELES", "pass": "167", "horas": 176}, {"legajo": "834", "nombre": "OLMEDO, SILVANA", "pass": "834", "horas": 176}, {"legajo": "1091", "nombre": "ONTIVERO, JUAN PABLO", "pass": "091", "horas": 176}, {"legajo": "243", "nombre": "ORTEGA, JULIO CESAR", "pass": "243", "horas": 120}, {"legajo": "967", "nombre": "OVIEDO, LAURA MARCELA", "pass": "967", "horas": 176}, {"legajo": "513", "nombre": "OVIEDO, MARIA VICTORIA", "pass": "513", "horas": 176}, {"legajo": "1062", "nombre": "OVIEDO, MARIELA SOLEDAD", "pass": "062", "horas": 120}, {"legajo": "461", "nombre": "PAEZ, ROXANA KARINA", "pass": "461", "horas": 176}, {"legajo": "00043", "nombre": "PALACIOS, GABRIELA FERNANDA", "pass": "043", "horas": 176}, {"legajo": "1279", "nombre": "PALACIOS, JAQUELINA DE LOS ANGELES", "pass": "279", "horas": 76}, {"legajo": "1258", "nombre": "PERALTA, JESICA ELIZABETH", "pass": "258", "horas": 120}, {"legajo": "295", "nombre": "PERALTA, MARIANA DE LOS ANGELES", "pass": "295", "horas": 160}, {"legajo": "619", "nombre": "PEREYRA, NADIA ROMINA", "pass": "619", "horas": 76}, {"legajo": "1286", "nombre": "PEREYRA, OFELIA VIVIANA", "pass": "286", "horas": 76}, {"legajo": "1285", "nombre": "PEREZ, GUADALUPE MACARENA", "pass": "285", "horas": 76}, {"legajo": "881", "nombre": "PEREZ, WALTER GUILLERMO", "pass": "881", "horas": 176}, {"legajo": "1269", "nombre": "PIZARRO, SILVANA LORENA", "pass": "269", "horas": 120}, {"legajo": "995", "nombre": "PREGOT, ROCIO BELEN", "pass": "995", "horas": 176}, {"legajo": "1280", "nombre": "PUCHETA, ROMINA PAOLA DEL VALLE", "pass": "280", "horas": 76}, {"legajo": "708", "nombre": "QUINTANA, JOSE LUIS", "pass": "708", "horas": 176}, {"legajo": "495", "nombre": "RAMOS, SUSANA MARIANA", "pass": "495", "horas": 176}, {"legajo": "807", "nombre": "RIOS, ERICA PATRICIA", "pass": "807", "horas": 160}, {"legajo": "999", "nombre": "ROBLEDO, GONZALO DAVID", "pass": "999", "horas": 176}, {"legajo": "923", "nombre": "ROBLEDO, MARIA SOLEDAD", "pass": "923", "horas": 176}, {"legajo": "1178", "nombre": "ROBLEDO ROMERO, CRISTIAN ROMAN", "pass": "178", "horas": 176}, {"legajo": "851", "nombre": "RODRIGUEZ, NOELIA AYELEN", "pass": "851", "horas": 120}, {"legajo": "1064", "nombre": "ROJAS, EVELIN CELESTE", "pass": "064", "horas": 176}, {"legajo": "1127", "nombre": "ROLDAN, DANIELA RUTH", "pass": "127", "horas": 176}, {"legajo": "00163", "nombre": "VASQUEZ, YANINA ELIZABETH", "pass": "163", "horas": 100}, {"legajo": "1272", "nombre": "VERA, CINTIA GISEL", "pass": "272", "horas": 100}, {"legajo": "796", "nombre": "VILLAVERDE MONTENEGRO, LAURA DANIELA", "pass": "796", "horas": 176}, {"legajo": "500", "nombre": "YEDRO, SANDRA EDITH", "pass": "500", "horas": 176}, {"legajo": "1089", "nombre": "ZAMORA, CRISTINA DEL VALLE", "pass": "089", "horas": 156}, {"legajo": "546", "nombre": "ZOHIL, DIEGO HERMINIO", "pass": "546", "horas": 176}, {"legajo": "956", "nombre": "TAMANTINI, SILVINA SOLEDAD", "pass": "956", "horas": 176}, {"legajo": "788", "nombre": "TOLEDO, BLANCA ISABEL", "pass": "788", "horas": 168}, {"legajo": "580", "nombre": "TORRES, FERNANDO DAVID", "pass": "580", "horas": 160}, {"legajo": "282", "nombre": "TRIMARCHI, CARLOS AGUSTIN", "pass": "282", "horas": 176}];
+
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = type; d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function pb(pct) { document.getElementById('pb').style.width = pct+'%'; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function toFS(data) {
+  const fields = {};
+  for (const [k,v] of Object.entries(data)) {
+    if (typeof v === 'string') fields[k] = {stringValue: v};
+    else if (typeof v === 'number') fields[k] = {integerValue: String(v)};
+    else if (typeof v === 'boolean') fields[k] = {booleanValue: v};
+  }
+  return {fields};
+}
+
+function normNombre(n) {
+  return n.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+}
+
+async function importar() {
+  document.getElementById('btn').disabled = true;
+  log('Cargando operarios actuales de Firestore...', 'info');
+
+  // Cargar todos los operarios existentes
+  let existentes = [];
+  let pageToken = '';
+  do {
+    const url = API + '/horas_usuarios?pageSize=300' + (pageToken ? '&pageToken='+encodeURIComponent(pageToken) : '');
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.documents) {
+      for (const doc of d.documents) {
+        const f = doc.fields || {};
+        existentes.push({
+          nombre: normNombre(f.nombre?.stringValue || ''),
+          legajo: f.legajo?.stringValue || '',
+          dni: f.dni?.stringValue || ''
+        });
+      }
+    }
+    pageToken = d.nextPageToken || '';
+    await sleep(300);
+  } while(pageToken);
+
+  log(`✓ ${existentes.length} operarios en Firestore`, 'ok');
+  document.getElementById('s-total').textContent = existentes.length;
+
+  // Detectar faltantes — comparar por nombre normalizado o legajo
+  const faltantes = EXCEL_OPS.filter(op => {
+    const nombreNorm = normNombre(op.nombre);
+    const enFS = existentes.find(e =>
+      e.nombre === nombreNorm ||
+      e.legajo === op.legajo ||
+      e.dni === op.legajo
+    );
+    return !enFS;
+  });
+
+  log(`Faltantes detectados: ${faltantes.length}`, faltantes.length > 0 ? 'warn' : 'ok');
+  document.getElementById('s-faltantes').textContent = faltantes.length;
+  pb(20);
+
+  if (faltantes.length === 0) {
+    log('✅ Todos los operarios ya están en Firestore', 'ok');
+    pb(100);
+    return;
+  }
+
+  log('Agregando operarios faltantes...', 'info');
+  let ok = 0, err = 0;
+
+  for (let i = 0; i < faltantes.length; i++) {
+    const op = faltantes[i];
+    const data = {
+      nombre: op.nombre,
+      dni: op.legajo,
+      legajo: op.legajo,
+      password: op.pass,
+      horasRecibo: op.horas,
+      rol: 'OPERARIO',
+      tipo: 'FIJO',
+      activo: true
+    };
+
+    try {
+      const r = await fetch(API + '/horas_usuarios', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(toFS(data))
+      });
+      if (r.ok) {
+        ok++;
+        log(`✓ ${op.nombre}`, 'ok');
+      } else {
+        err++;
+        log(`Error ${op.nombre}`, 'err');
+      }
+    } catch(e) { err++; }
+
+    document.getElementById('s-ok').textContent = ok;
+    document.getElementById('s-err').textContent = err;
+    pb(20 + (i+1)/faltantes.length*80);
+    await sleep(150);
+  }
+
+  pb(100);
+  log('', 'info');
+  log(`✅ COMPLETO — Agregados: ${ok} · Errores: ${err}`, 'ok');
+  log('Recargá la app y van a aparecer todos los operarios', 'info');
+}
+</script>
+</body>
+</html>
