@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>MegaClean · Gestión de Horas</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <style>
   :root {
     --bg: #f4f7fa;
@@ -377,7 +380,7 @@
 //  FIREBASE CONFIG
 // ════════════════════════════════════════════
 const FB_CONFIG = {
-  apiKey: "AIzaSyBg7lvQteU0aHwEyI1qe10UPK81-9DL0Ng",
+  apiKey: "AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng",
   authDomain: "mega-clean-12f17.firebaseapp.com",
   projectId: "mega-clean-12f17",
   storageBucket: "mega-clean-12f17.appspot.com",
@@ -437,7 +440,8 @@ function fromFS(doc) {
 }
 
 async function fsGet(col, id) {
-  const r = await fetch(`${API}/${col}/${id}`);
+  const headers = await getAuthHeaders();
+  const r = await fetch(`${API}/${col}/${id}`, { headers });
   if (!r.ok) return null;
   return fromFS(await r.json());
 }
@@ -450,7 +454,8 @@ const CACHE_TTL = 300000; // 5 minutos
 async function fsListPage(col, pageToken) {
   const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
   try {
-    const r = await fetch(url);
+    const headers = await getAuthHeaders();
+    const r = await fetch(url, { headers });
     if (!r.ok) return null;
     return await r.json();
   } catch(e) {
@@ -473,7 +478,7 @@ async function fsList(col) {
     if (!data) break;
     if (data.documents) allDocs = allDocs.concat(data.documents.map(fromFS));
     pageToken = data.nextPageToken || '';
-    if (pageToken) await new Promise(res => setTimeout(res, 600));
+    if (pageToken) await new Promise(res => setTimeout(res, 200));
     safety++;
     if (safety > 15) break;
   } while (pageToken);
@@ -491,15 +496,17 @@ function invalidarCache(col) {
 async function fsSave(col, id, data) {
   const body = toFS(data);
   const mask = Object.keys(data).map(k => `updateMask.fieldPaths=${k}`).join('&');
+  const headers = await getAuthHeaders();
   const r = await fetch(`${API}/${col}/${id}?${mask}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    method: 'PATCH', headers, body: JSON.stringify(body)
   });
   return r.ok;
 }
 
 async function fsAdd(col, data) {
+  const headers = await getAuthHeaders();
   const r = await fetch(`${API}/${col}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(toFS(data))
+    method: 'POST', headers, body: JSON.stringify(toFS(data))
   });
   if (!r.ok) {
     const err = await r.json().catch(()=>({}));
@@ -511,7 +518,8 @@ async function fsAdd(col, data) {
 }
 
 async function fsDelete(col, id) {
-  await fetch(`${API}/${col}/${id}`, { method: 'DELETE' });
+  const headers = await getAuthHeaders();
+  await fetch(`${API}/${col}/${id}`, { method: 'DELETE', headers });
 }
 
 // ════════════════════════════════════════════
@@ -528,12 +536,40 @@ function toast(msg, type = 'info') {
 
 window.onerror = function(msg, src, line, col, err) {
   console.error('JS Error:', msg, 'line:', line);
-  // Si hay error al inicio, igual mostrar el login
   const loader = document.getElementById('loader');
   const login = document.getElementById('screen-login');
   if (loader) loader.style.display = 'none';
   if (login) login.classList.remove('hidden');
 };
+
+// ── FIREBASE INIT ──
+const FB_CONFIG = {
+  apiKey: "AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng",
+  authDomain: "mega-clean-12f17.firebaseapp.com",
+  projectId: "mega-clean-12f17"
+};
+firebase.initializeApp(FB_CONFIG);
+const fbAuth = firebase.auth();
+
+// Token de autenticación actual
+let _authToken = null;
+
+async function getAuthToken() {
+  try {
+    const user = fbAuth.currentUser;
+    if (user) {
+      _authToken = await user.getIdToken();
+      return _authToken;
+    }
+  } catch(e) {}
+  return null;
+}
+
+async function getAuthHeaders() {
+  const token = await getAuthToken();
+  if (token) return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+  return { 'Content-Type': 'application/json' };
+}
 
 function togglePassVis() {
   const inp = document.getElementById('login-pass');
@@ -553,31 +589,61 @@ async function doLogin() {
   const pass = document.getElementById('login-pass').value.trim();
   if (!dni || !pass) return toast('Ingresá DNI y contraseña', 'warn');
 
-  // Admin hardcoded — acepta "admin", "ADMIN", o DNI 25365716
   const dniLower = dni.toLowerCase();
-  if (dniLower === 'admin' || dni === '25365716') {
-    const claveOk = (dniLower === 'admin' && pass === 'admin1234') || (dni === '25365716' && pass === '1945');
-    if (claveOk) {
-      currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni: dni };
+
+  // Intentar login con Firebase Auth
+  const email = (dniLower === 'admin' ? 'admin' : dni) + '@megaclean.com.ar';
+  try {
+    showLoader(true);
+    await fbAuth.signInWithEmailAndPassword(email, pass);
+    // Auth exitoso — cargar perfil del usuario desde Firestore
+    const users = await fsList('horas_usuarios');
+    showLoader(false);
+
+    // Admin hardcoded
+    if (dniLower === 'admin' || dni === '25365716') {
+      const claveOk = (dniLower === 'admin' && pass === 'admin1234') || (dni === '25365716' && pass === '1945');
+      if (claveOk) {
+        currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni };
+        iniciarApp();
+        return;
+      }
+    }
+
+    const user = users.find(u => String(u.dni) === String(dni) && u.activo !== false);
+    if (!user) return toast('Usuario no encontrado en el sistema', 'error');
+    currentUser = user;
+    iniciarApp();
+
+  } catch(authErr) {
+    showLoader(false);
+    // Si falla Firebase Auth, intentar login legacy (para admin hardcoded)
+    if (dniLower === 'admin' || dni === '25365716') {
+      const claveOk = (dniLower === 'admin' && pass === 'admin1234') || (dni === '25365716' && pass === '1945');
+      if (claveOk) {
+        currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni };
+        iniciarApp();
+        return;
+      }
+    }
+    // Fallback: login manual sin Firebase Auth (mientras se migran usuarios)
+    const users = await fsList('horas_usuarios');
+    const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
+    if (user) {
+      currentUser = user;
       iniciarApp();
-      return;
     } else {
-      return toast('Contraseña incorrecta', 'error');
+      toast('DNI o contraseña incorrectos', 'error');
     }
   }
-
-  showLoader(true);
-  const users = await fsList('horas_usuarios');
-  showLoader(false);
-  const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
-  if (!user) return toast('DNI o contraseña incorrectos', 'error');
-  currentUser = user;
-  iniciarApp();
 }
 
 function doLogout() {
+  fbAuth.signOut().catch(()=>{});
   currentUser = null;
   if (reloj_interval) clearInterval(reloj_interval);
+  // Limpiar cache al salir
+  Object.keys(_fsCache).forEach(k => invalidarCache(k));
   document.getElementById('app').classList.add('hidden');
   document.getElementById('screen-login').classList.remove('hidden');
   document.getElementById('login-dni').value = '';
