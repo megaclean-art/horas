@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MegaClean · Crear Usuarios Auth</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',sans-serif;background:#f4f7fa;color:#1a2533;padding:24px}
+  h1{color:#1a8fcb;font-size:22px;margin-bottom:4px}
+  .sub{color:#7a8899;font-size:13px;margin-bottom:20px}
+  .card{background:#fff;border:1.5px solid #dce3ed;border-radius:14px;padding:20px;margin-bottom:16px;max-width:640px}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+  .stat{font-size:36px;font-weight:900;color:#1a8fcb}
+  .stat-label{font-size:11px;color:#8fa3b8;text-transform:uppercase;letter-spacing:1px;margin-top:2px}
+  .btn{background:linear-gradient(135deg,#1a8fcb,#0e6fa0);color:#fff;border:none;border-radius:10px;padding:13px 24px;font-size:15px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;width:100%;max-width:640px;display:block;margin-bottom:10px}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .progress{background:#dce3ed;border-radius:4px;height:6px;max-width:640px;margin-bottom:12px;overflow:hidden}
+  .progress-bar{height:100%;background:#1a8fcb;transition:width .2s;width:0%;border-radius:4px}
+  .log{background:#1a2533;border-radius:10px;padding:14px;height:360px;overflow-y:auto;font-family:monospace;font-size:12px;max-width:640px}
+  .ok{color:#27a85a}.err{color:#d63d4a}.info{color:#1a8fcb}.warn{color:#e07b2a}
+  .field{margin-bottom:12px;max-width:640px}
+  .field label{display:block;font-size:11px;font-weight:700;color:#8fa3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+  .field input{width:100%;background:#f4f7fa;border:1.5px solid #dce3ed;color:#1a2533;padding:9px 12px;border-radius:8px;font-size:14px;outline:none}
+</style>
+</head>
+<body>
+<h1>MEGACLEAN · CREAR USUARIOS AUTH</h1>
+<div class="sub">164 operarios embebidos desde Excel · Contraseña = últimos 3 dígitos del legajo</div>
+
+<div class="field">
+  <label>API Key Firebase</label>
+  <input id="api-key" value="AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng">
+</div>
+
+<div class="card">
+  <div class="grid">
+    <div><div class="stat">164</div><div class="stat-label">Operarios</div></div>
+    <div><div class="stat" id="stat-ok" style="color:#27a85a">0</div><div class="stat-label">Creados</div></div>
+    <div><div class="stat" id="stat-exist" style="color:#e07b2a">0</div><div class="stat-label">Ya existían</div></div>
+    <div><div class="stat" id="stat-err" style="color:#d63d4a">0</div><div class="stat-label">Errores</div></div>
+  </div>
+</div>
+
+<div class="progress"><div class="progress-bar" id="pb"></div></div>
+<button class="btn" id="btn-go" onclick="crearTodos()">▶ CREAR 164 USUARIOS EN FIREBASE AUTH</button>
+<div class="log" id="log"></div>
+
+<script>
+const OPERARIOS = [{"dni": "00064", "nombre": "ACOSTA, LORENA MACARENA", "passAuth": "064064", "passCorta": "064"}, {"dni": "238", "nombre": "ACUÑA, MARIELA JUDY", "passAuth": "238238", "passCorta": "238"}, {"dni": "1216", "nombre": "AGUIRRE, FIAMA CELESTE", "passAuth": "216216", "passCorta": "216"}, {"dni": "747", "nombre": "AGUIRRE, YAMILA SOLEDAD", "passAuth": "747747", "passCorta": "747"}, {"dni": "733", "nombre": "ALANIE, MONICA DANIELA", "passAuth": "733733", "passCorta": "733"}, {"dni": "00128", "nombre": "ALDERETE, VANESA ALEJANDRA", "passAuth": "128128", "passCorta": "128"}, {"dni": "44", "nombre": "ALI, ROBERTO CARLOS", "passAuth": "444444", "passCorta": "44"}, {"dni": "484", "nombre": "ALTAMIRANO RUEDA, GABRIEL ALEJANDRO", "passAuth": "484484", "passCorta": "484"}, {"dni": "474", "nombre": "ANDRADA, GASTON DARIO", "passAuth": "474474", "passCorta": "474"}, {"dni": "269", "nombre": "ARIAS, ERIKA ELENA GISELLE", "passAuth": "269269", "passCorta": "269"}, {"dni": "1030", "nombre": "ARIAS, LAUTARO FABRIZIO", "passAuth": "030030", "passCorta": "030"}, {"dni": "00074", "nombre": "ARMESTO, ASTRID NOEMI", "passAuth": "074074", "passCorta": "074"}, {"dni": "1059", "nombre": "ARROYO, LAURA SOLEDAD", "passAuth": "059059", "passCorta": "059"}, {"dni": "843", "nombre": "ARTAZA, VANESA BELEN", "passAuth": "843843", "passCorta": "843"}, {"dni": "420", "nombre": "BAIGORRIA, LAURA SOLEDAD", "passAuth": "420420", "passCorta": "420"}, {"dni": "1236", "nombre": "BARBOSA, ALEXIS EZEQUIEL", "passAuth": "236236", "passCorta": "236"}, {"dni": "1078", "nombre": "BARRAZA, JANET YAMILA", "passAuth": "078078", "passCorta": "078"}, {"dni": "213", "nombre": "BARRERA, YANINA YOHANA", "passAuth": "213213", "passCorta": "213"}, {"dni": "883", "nombre": "BARRIONUEVO, GRISELDA NOELIA", "passAuth": "883883", "passCorta": "883"}, {"dni": "1057", "nombre": "BASTIAS, GERARDO EXEQUIEL", "passAuth": "057057", "passCorta": "057"}, {"dni": "872", "nombre": "BASTIDAS HERNANDEZ, YESSICA ANDREINA", "passAuth": "872872", "passCorta": "872"}, {"dni": "1185", "nombre": "BIASUTTI, MELISA DANIELA", "passAuth": "185185", "passCorta": "185"}, {"dni": "548", "nombre": "BRACAMONTE, ESTEBAN RAFAEL", "passAuth": "548548", "passCorta": "548"}, {"dni": "00078", "nombre": "BUSTOS, PATRICIA ALEJANDRA", "passAuth": "078078", "passCorta": "078"}, {"dni": "00175", "nombre": "CABELLO, PATRICIA ANDREA", "passAuth": "175175", "passCorta": "175"}, {"dni": "479", "nombre": "CABRERA, YOHANA DE LOURDES", "passAuth": "479479", "passCorta": "479"}, {"dni": "1212", "nombre": "CAMPOS, BRUNO JULIAN", "passAuth": "212212", "passCorta": "212"}, {"dni": "00107", "nombre": "CAPDEVILA, NANCY BEATRIZ", "passAuth": "107107", "passCorta": "107"}, {"dni": "00060", "nombre": "CARABAJAL, ANDREA FABIANA", "passAuth": "060060", "passCorta": "060"}, {"dni": "543", "nombre": "CARO, NESTOR VICTOR HUGO", "passAuth": "543543", "passCorta": "543"}, {"dni": "1278", "nombre": "CARRIZO, CELESTE CATERIN", "passAuth": "278278", "passCorta": "278"}, {"dni": "00120", "nombre": "CARRIZO, ESTELA EDITH", "passAuth": "120120", "passCorta": "120"}, {"dni": "1171", "nombre": "CASTILLO, CELESTE ALEJANDRA", "passAuth": "171171", "passCorta": "171"}, {"dni": "1245", "nombre": "CASTILLO, YAMILA IVANA", "passAuth": "245245", "passCorta": "245"}, {"dni": "544", "nombre": "CASTRO, JAVIER ENRIQUE", "passAuth": "544544", "passCorta": "544"}, {"dni": "1060", "nombre": "CASTRO, LAURA MARIELA", "passAuth": "060060", "passCorta": "060"}, {"dni": "00201", "nombre": "CATALA, VERONICA LORENA", "passAuth": "201201", "passCorta": "201"}, {"dni": "879", "nombre": "CEBALLOS, ANACLARA", "passAuth": "879879", "passCorta": "879"}, {"dni": "224", "nombre": "CEPEDA, ALDANA DEL MILAGRO", "passAuth": "224224", "passCorta": "224"}, {"dni": "1048", "nombre": "CHAVARRIA MARCELO, DAVID EMANUEL", "passAuth": "048048", "passCorta": "048"}, {"dni": "690", "nombre": "CHAVERO, MARIA EUGENIA", "passAuth": "690690", "passCorta": "690"}, {"dni": "1226", "nombre": "COLIN LESCANO, TERESA BEATRIZ", "passAuth": "226226", "passCorta": "226"}, {"dni": "1032", "nombre": "COMOLLO, PAULA VALERIA", "passAuth": "032032", "passCorta": "032"}, {"dni": "902", "nombre": "CONTINI, MARIA BELEN", "passAuth": "902902", "passCorta": "902"}, {"dni": "878", "nombre": "CORDOBA, JACQUELINE", "passAuth": "878878", "passCorta": "878"}, {"dni": "1008", "nombre": "CORTEZ, GUILLERMO KEVIN", "passAuth": "008008", "passCorta": "008"}, {"dni": "1268", "nombre": "CORTEZ, ROSA DEL VALLE", "passAuth": "268268", "passCorta": "268"}, {"dni": "00081", "nombre": "CRIADO, ROSANA ESTHER", "passAuth": "081081", "passCorta": "081"}, {"dni": "633", "nombre": "DAGATTI, CECILIA ESTER", "passAuth": "633633", "passCorta": "633"}, {"dni": "1277", "nombre": "DAVILA, DANIELA DE LOURDES", "passAuth": "277277", "passCorta": "277"}, {"dni": "1290", "nombre": "DAVILA, SUSANA MARISEL", "passAuth": "290290", "passCorta": "290"}, {"dni": "00126", "nombre": "DE ARRASCAETA, SILVANA ADELA", "passAuth": "126126", "passCorta": "126"}, {"dni": "975", "nombre": "DELGADO, LUIS ALBERTO", "passAuth": "975975", "passCorta": "975"}, {"dni": "1251", "nombre": "DI PAULA, INDIRA KARIN", "passAuth": "251251", "passCorta": "251"}, {"dni": "00079", "nombre": "DIAZ, LOURDES YANINA", "passAuth": "079079", "passCorta": "079"}, {"dni": "00116", "nombre": "DIAZ, MONICA ALEJANDRA", "passAuth": "116116", "passCorta": "116"}, {"dni": "1109", "nombre": "DOMINGUEZ, MARIA VANESA", "passAuth": "109109", "passCorta": "109"}, {"dni": "1266", "nombre": "DULCE, ROCIO AYELEN", "passAuth": "266266", "passCorta": "266"}, {"dni": "407", "nombre": "ETCHEGARAY, PATRICIA VERONICA", "passAuth": "407407", "passCorta": "407"}, {"dni": "723", "nombre": "FERNANDEZ, CECILIA NOELIA", "passAuth": "723723", "passCorta": "723"}, {"dni": "308", "nombre": "FERNANDEZ, CRISTINA OFELIA", "passAuth": "308308", "passCorta": "308"}, {"dni": "327", "nombre": "FERREYRA, FRANCO GABRIEL", "passAuth": "327327", "passCorta": "327"}, {"dni": "536", "nombre": "FIGUEROA, FERNANDA SOLEDAD", "passAuth": "536536", "passCorta": "536"}, {"dni": "1260", "nombre": "FONTANA, CINTIA ROMINA", "passAuth": "260260", "passCorta": "260"}, {"dni": "1010", "nombre": "GARAY, ANGEL EZEQUIEL", "passAuth": "010010", "passCorta": "010"}, {"dni": "1254", "nombre": "GERZEY, LUDMILA", "passAuth": "254254", "passCorta": "254"}, {"dni": "936", "nombre": "GODOY, EMA IRENE", "passAuth": "936936", "passCorta": "936"}, {"dni": "00203", "nombre": "GODOY, SILVANA ALEJANDRA", "passAuth": "203203", "passCorta": "203"}, {"dni": "994", "nombre": "GOMEZ TERRON, JESICA FERNANDA", "passAuth": "994994", "passCorta": "994"}, {"dni": "745", "nombre": "GONZALEZ, LORENA MARIELA", "passAuth": "745745", "passCorta": "745"}, {"dni": "1275", "nombre": "GORDILLO, ALBERTO EMANUEL", "passAuth": "275275", "passCorta": "275"}, {"dni": "1004", "nombre": "GUDIÑO TULA, SANDRA GRACIELA", "passAuth": "004004", "passCorta": "004"}, {"dni": "00041", "nombre": "GUERRERO, ANDREA FABIANA", "passAuth": "041041", "passCorta": "041"}, {"dni": "1128", "nombre": "GUEVARA, VILMA VERONICA", "passAuth": "128128", "passCorta": "128"}, {"dni": "1096", "nombre": "GUTIERREZ VEGA, FIDELIA", "passAuth": "096096", "passCorta": "096"}, {"dni": "396", "nombre": "HEREDIA, MARIA CELESTE", "passAuth": "396396", "passCorta": "396"}, {"dni": "1092", "nombre": "IBARRA, FABRIZIO ALAN IVAN", "passAuth": "092092", "passCorta": "092"}, {"dni": "661", "nombre": "IGLESIAS, YANINA SOLEDAD", "passAuth": "661661", "passCorta": "661"}, {"dni": "1249", "nombre": "JAIME, SERGIO AGUSTIN", "passAuth": "249249", "passCorta": "249"}, {"dni": "1271", "nombre": "JUNCOS SOLIZ, SOFIA VALENTINA", "passAuth": "271271", "passCorta": "271"}, {"dni": "1207", "nombre": "LEDESMA, GISELA CAROLINA", "passAuth": "207207", "passCorta": "207"}, {"dni": "862", "nombre": "LEDESMAS, LOURDES NOELIA", "passAuth": "862862", "passCorta": "862"}, {"dni": "1209", "nombre": "LEDEZMA, MARIA SUSANA", "passAuth": "209209", "passCorta": "209"}, {"dni": "951", "nombre": "LENCINA, CARINA EUGENIA", "passAuth": "951951", "passCorta": "951"}, {"dni": "1210", "nombre": "LIVIERO, RICARDO MATIAS", "passAuth": "210210", "passCorta": "210"}, {"dni": "1041", "nombre": "LOPEZ, ADRIAN EDUARDO", "passAuth": "041041", "passCorta": "041"}, {"dni": "602", "nombre": "LUDUEÑA, JUAN JOSE", "passAuth": "602602", "passCorta": "602"}, {"dni": "1284", "nombre": "LUNA, ANA MARCELA", "passAuth": "284284", "passCorta": "284"}, {"dni": "1289", "nombre": "LUNA, KARINA DEL VALLE", "passAuth": "289289", "passCorta": "289"}, {"dni": "1282", "nombre": "MANSILLA, LOURDES YAMILA", "passAuth": "282282", "passCorta": "282"}, {"dni": "1257", "nombre": "MARESTI, ANAHI", "passAuth": "257257", "passCorta": "257"}, {"dni": "565", "nombre": "MICUDA, JIMENA NATALÍ", "passAuth": "565565", "passCorta": "565"}, {"dni": "1197", "nombre": "MOLINA, CYNTHIA CAREN", "passAuth": "197197", "passCorta": "197"}, {"dni": "00042", "nombre": "MOLINA, DANIEL AMERICO", "passAuth": "042042", "passCorta": "042"}, {"dni": "1141", "nombre": "MOLINA, RAMONA ALEJANDRA", "passAuth": "141141", "passCorta": "141"}, {"dni": "547", "nombre": "MONTELLANOS, GUSTAVO RAUL", "passAuth": "547547", "passCorta": "547"}, {"dni": "1151", "nombre": "MORALES, YANINA SOLEDAD DEL CARMEN", "passAuth": "151151", "passCorta": "151"}, {"dni": "00130", "nombre": "MORENO, MARIA CRISTINA", "passAuth": "130130", "passCorta": "130"}, {"dni": "1204", "nombre": "MOYANO, ADRIANA PAOLA", "passAuth": "204204", "passCorta": "204"}, {"dni": "00139", "nombre": "MOYANO, MARIANA SOLEDAD", "passAuth": "139139", "passCorta": "139"}, {"dni": "1217", "nombre": "MURUA, CRISTIAN ISMAEL", "passAuth": "217217", "passCorta": "217"}, {"dni": "758", "nombre": "NARVAJA, ANDRES ROBERTO CARLOS", "passAuth": "758758", "passCorta": "758"}, {"dni": "1227", "nombre": "NAZZETTA, ANTONELLA", "passAuth": "227227", "passCorta": "227"}, {"dni": "892", "nombre": "NIETO, ALICIA DEL CARMEN", "passAuth": "892892", "passCorta": "892"}, {"dni": "304", "nombre": "NIVOLI, MARIA PAOLA", "passAuth": "304304", "passCorta": "304"}, {"dni": "1218", "nombre": "OLIVA, CLAUDIO JOEL", "passAuth": "218218", "passCorta": "218"}, {"dni": "752", "nombre": "OLIVA, VALERIA DEL CARMEN", "passAuth": "752752", "passCorta": "752"}, {"dni": "1167", "nombre": "OLMEDO, MARIA DE LOS ANGELES", "passAuth": "167167", "passCorta": "167"}, {"dni": "834", "nombre": "OLMEDO, SILVANA", "passAuth": "834834", "passCorta": "834"}, {"dni": "1091", "nombre": "ONTIVERO, JUAN PABLO", "passAuth": "091091", "passCorta": "091"}, {"dni": "243", "nombre": "ORTEGA, JULIO CESAR", "passAuth": "243243", "passCorta": "243"}, {"dni": "967", "nombre": "OVIEDO, LAURA MARCELA", "passAuth": "967967", "passCorta": "967"}, {"dni": "513", "nombre": "OVIEDO, MARIA VICTORIA", "passAuth": "513513", "passCorta": "513"}, {"dni": "1062", "nombre": "OVIEDO, MARIELA SOLEDAD", "passAuth": "062062", "passCorta": "062"}, {"dni": "461", "nombre": "PAEZ, ROXANA KARINA", "passAuth": "461461", "passCorta": "461"}, {"dni": "00043", "nombre": "PALACIOS, GABRIELA FERNANDA", "passAuth": "043043", "passCorta": "043"}, {"dni": "1279", "nombre": "PALACIOS, JAQUELINA DE LOS ANGELES", "passAuth": "279279", "passCorta": "279"}, {"dni": "1258", "nombre": "PERALTA, JESICA ELIZABETH", "passAuth": "258258", "passCorta": "258"}, {"dni": "295", "nombre": "PERALTA, MARIANA DE LOS ANGELES", "passAuth": "295295", "passCorta": "295"}, {"dni": "619", "nombre": "PEREYRA, NADIA ROMINA", "passAuth": "619619", "passCorta": "619"}, {"dni": "1286", "nombre": "PEREYRA, OFELIA VIVIANA", "passAuth": "286286", "passCorta": "286"}, {"dni": "1285", "nombre": "PEREZ, GUADALUPE MACARENA", "passAuth": "285285", "passCorta": "285"}, {"dni": "881", "nombre": "PEREZ, WALTER GUILLERMO", "passAuth": "881881", "passCorta": "881"}, {"dni": "1269", "nombre": "PIZARRO, SILVANA LORENA", "passAuth": "269269", "passCorta": "269"}, {"dni": "995", "nombre": "PREGOT, ROCIO BELEN", "passAuth": "995995", "passCorta": "995"}, {"dni": "1280", "nombre": "PUCHETA, ROMINA PAOLA DEL VALLE", "passAuth": "280280", "passCorta": "280"}, {"dni": "708", "nombre": "QUINTANA, JOSE LUIS", "passAuth": "708708", "passCorta": "708"}, {"dni": "495", "nombre": "RAMOS, SUSANA MARIANA", "passAuth": "495495", "passCorta": "495"}, {"dni": "807", "nombre": "RIOS, ERICA PATRICIA", "passAuth": "807807", "passCorta": "807"}, {"dni": "999", "nombre": "ROBLEDO, GONZALO DAVID", "passAuth": "999999", "passCorta": "999"}, {"dni": "923", "nombre": "ROBLEDO, MARIA SOLEDAD", "passAuth": "923923", "passCorta": "923"}, {"dni": "702", "nombre": "ROBLEDO, MARIA VICTORIA", "passAuth": "702702", "passCorta": "702"}, {"dni": "1178", "nombre": "ROBLEDO ROMERO, CRISTIAN ROMAN", "passAuth": "178178", "passCorta": "178"}, {"dni": "851", "nombre": "RODRIGUEZ, NOELIA AYELEN", "passAuth": "851851", "passCorta": "851"}, {"dni": "1064", "nombre": "ROJAS, EVELIN CELESTE", "passAuth": "064064", "passCorta": "064"}, {"dni": "1127", "nombre": "ROLDAN, DANIELA RUTH", "passAuth": "127127", "passCorta": "127"}, {"dni": "1131", "nombre": "ROLDAN, FLORENCIA ELIANA", "passAuth": "131131", "passCorta": "131"}, {"dni": "00089", "nombre": "ROMANO, ROXANA ELIZABETH", "passAuth": "089089", "passCorta": "089"}, {"dni": "00009", "nombre": "ROMERO, JUAN JOSE", "passAuth": "009009", "passCorta": "009"}, {"dni": "725", "nombre": "ROMOLI, MARIELA ALEJANDRA", "passAuth": "725725", "passCorta": "725"}, {"dni": "545", "nombre": "SALAS, ALEJANDRO LUJAN", "passAuth": "545545", "passCorta": "545"}, {"dni": "512", "nombre": "SALAS, PEDRO GUSTAVO", "passAuth": "512512", "passCorta": "512"}, {"dni": "1168", "nombre": "SALGUERO, MARISA ANDREA", "passAuth": "168168", "passCorta": "168"}, {"dni": "00101", "nombre": "SANCHEZ, CARLA NATALIA", "passAuth": "101101", "passCorta": "101"}, {"dni": "314", "nombre": "SARRIA, LUCIANA YUDITH", "passAuth": "314314", "passCorta": "314"}, {"dni": "441", "nombre": "SERRANO, JESSICA MARIANA", "passAuth": "441441", "passCorta": "441"}, {"dni": "1243", "nombre": "SIACCA, CLAUDIA ALEJANDRA", "passAuth": "243243", "passCorta": "243"}, {"dni": "1040", "nombre": "SILVA, NANCY ROXANA", "passAuth": "040040", "passCorta": "040"}, {"dni": "714", "nombre": "SILVA, RAQUEL JULIA", "passAuth": "714714", "passCorta": "714"}, {"dni": "1259", "nombre": "SOLIZ, JOSE GABRIEL", "passAuth": "259259", "passCorta": "259"}, {"dni": "904", "nombre": "SORIA, CAROLINA NATALIA", "passAuth": "904904", "passCorta": "904"}, {"dni": "856", "nombre": "SOSA, MARIA ALEJANDRA", "passAuth": "856856", "passCorta": "856"}, {"dni": "00093", "nombre": "SOSA, MARIA DOLORES", "passAuth": "093093", "passCorta": "093"}, {"dni": "1274", "nombre": "SOSA, NATALIA ROMINA", "passAuth": "274274", "passCorta": "274"}, {"dni": "956", "nombre": "TAMANTINI, SILVINA SOLEDAD", "passAuth": "956956", "passCorta": "956"}, {"dni": "788", "nombre": "TOLEDO, BLANCA ISABEL", "passAuth": "788788", "passCorta": "788"}, {"dni": "580", "nombre": "TORRES, FERNANDO DAVID", "passAuth": "580580", "passCorta": "580"}, {"dni": "282", "nombre": "TRIMARCHI, CARLOS AGUSTIN", "passAuth": "282282", "passCorta": "282"}, {"dni": "00163", "nombre": "VASQUEZ, YANINA ELIZABETH", "passAuth": "163163", "passCorta": "163"}, {"dni": "1272", "nombre": "VERA, CINTIA GISEL", "passAuth": "272272", "passCorta": "272"}, {"dni": "796", "nombre": "VILLAVERDE MONTENEGRO, LAURA DANIELA", "passAuth": "796796", "passCorta": "796"}, {"dni": "500", "nombre": "YEDRO, SANDRA EDITH", "passAuth": "500500", "passCorta": "500"}, {"dni": "1089", "nombre": "ZAMORA, CRISTINA DEL VALLE", "passAuth": "089089", "passCorta": "089"}, {"dni": "546", "nombre": "ZOHIL, DIEGO HERMINIO", "passAuth": "546546", "passCorta": "546"}];
+// Agregar admins
+OPERARIOS.push({dni:'25365716', nombre:'Roberto Admin', passAuth:'194519', passCorta:'1945'});
+OPERARIOS.push({dni:'admin', nombre:'Administrador', passAuth:'admin1', passCorta:'admin1234'});
+
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = type; d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function pb(pct) { document.getElementById('pb').style.width = pct + '%'; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function crearTodos() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  if (!apiKey) { alert('Completá el API Key'); return; }
+  document.getElementById('btn-go').disabled = true;
+  const AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
+
+  log(`Creando ${OPERARIOS.length} usuarios...`, 'info');
+  log('Contraseña por defecto = últimos 3 dígitos del legajo (completado a 6)', 'warn');
+  let ok=0, exist=0, err=0;
+  const sinPass=[];
+
+  for (let i=0; i<OPERARIOS.length; i++) {
+    const op = OPERARIOS[i];
+    const email = op.dni + '@megaclean.com.ar';
+    const pass = op.passAuth;
+
+    try {
+      const r = await fetch(AUTH_URL, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({email, password: pass, returnSecureToken:false})
+      });
+      const d = await r.json();
+      if (d.error) {
+        if (d.error.message === 'EMAIL_EXISTS') {
+          exist++;
+        } else {
+          err++;
+          log(`Error ${op.nombre}: ${d.error.message}`, 'err');
+        }
+      } else {
+        ok++;
+        sinPass.push(`${op.nombre} (Leg.${op.dni}) → clave: ${op.passCorta}`);
+      }
+    } catch(e) { err++; }
+
+    document.getElementById('stat-ok').textContent = ok;
+    document.getElementById('stat-exist').textContent = exist;
+    document.getElementById('stat-err').textContent = err;
+    pb((i+1)/OPERARIOS.length*100);
+    if ((i+1)%20===0) log(`${i+1}/${OPERARIOS.length} · OK:${ok} · Exist:${exist} · Err:${err}`, 'ok');
+    await sleep(80);
+  }
+
+  pb(100);
+  log('', 'info');
+  log('✅ PROCESO COMPLETO', 'ok');
+  log(`Creados: ${ok} · Ya existían: ${exist} · Errores: ${err}`, 'ok');
+  log('', 'info');
+  log('--- CONTRASEÑAS DE ACCESO (guardá esta lista) ---', 'warn');
+  for (const s of sinPass) log(s, 'warn');
+}
+</script>
+</body>
+</html>
