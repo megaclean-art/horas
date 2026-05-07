@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MegaClean · Crear Usuarios Auth</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI',sans-serif; background:#f4f7fa; color:#1a2533; padding:24px; }
+  h1 { color:#1a8fcb; font-size:22px; margin-bottom:4px; }
+  .sub { color:#7a8899; font-size:13px; margin-bottom:24px; }
+  .card { background:#fff; border:1.5px solid #dce3ed; border-radius:14px; padding:22px; margin-bottom:18px; max-width:640px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:14px; }
+  .stat { font-size:36px; font-weight:900; color:#1a8fcb; }
+  .stat-label { font-size:11px; color:#8fa3b8; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
+  .btn { background:linear-gradient(135deg,#1a8fcb,#0e6fa0); color:#fff; border:none; border-radius:10px; padding:14px 28px; font-size:16px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; cursor:pointer; width:100%; max-width:640px; display:block; margin-bottom:12px; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .progress { background:#dce3ed; border-radius:4px; height:6px; max-width:640px; margin-bottom:14px; overflow:hidden; }
+  .progress-bar { height:100%; background:#1a8fcb; transition:width .25s; width:0%; border-radius:4px; }
+  .log { background:#1a2533; border-radius:10px; padding:16px; height:360px; overflow-y:auto; font-family:monospace; font-size:12px; max-width:640px; }
+  .ok { color:#27a85a; } .err { color:#d63d4a; } .info { color:#1a8fcb; } .warn { color:#e07b2a; }
+  .field { margin-bottom:14px; max-width:640px; }
+  .field label { display:block; font-size:11px; font-weight:700; color:#8fa3b8; text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; }
+  .field input { width:100%; background:#f4f7fa; border:1.5px solid #dce3ed; color:#1a2533; padding:10px 12px; border-radius:8px; font-size:14px; outline:none; }
+</style>
+</head>
+<body>
+<h1>MEGACLEAN · CREAR USUARIOS AUTH</h1>
+<div class="sub">Crea usuarios en Firebase Auth — contraseña por defecto: últimos 3 dígitos del DNI</div>
+
+<div class="field">
+  <label>🔑 API Key de Firebase Authentication</label>
+  <input type="text" id="api-key" placeholder="AIzaSy..." value="">
+  <div style="font-size:11px;color:#8fa3b8;margin-top:4px">Obtenerla en: console.firebase.google.com → Configuración del proyecto → Clave de API web</div>
+</div>
+
+<div class="card">
+  <div class="grid">
+    <div><div class="stat" id="stat-total">—</div><div class="stat-label">Operarios</div></div>
+    <div><div class="stat" id="stat-ok" style="color:#27a85a">0</div><div class="stat-label">Creados</div></div>
+    <div><div class="stat" id="stat-exist" style="color:#e07b2a">0</div><div class="stat-label">Ya existían</div></div>
+    <div><div class="stat" id="stat-err" style="color:#d63d4a">0</div><div class="stat-label">Errores</div></div>
+  </div>
+</div>
+
+<div class="progress"><div class="progress-bar" id="pb"></div></div>
+<button class="btn" id="btn-go" onclick="iniciar()">▶ INICIAR</button>
+<div class="log" id="log"></div>
+
+<script>
+const FIRESTORE = 'https://firestore.googleapis.com/v1/projects/mega-clean-12f17/databases/(default)/documents';
+
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = type; d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function pb(pct) { document.getElementById('pb').style.width = pct + '%'; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function ultimosTres(dni) {
+  const s = String(dni).replace(/\D/g,'');
+  return s.slice(-3) || '000';
+}
+
+function toFS(data) {
+  const fields = {};
+  for (const [k,v] of Object.entries(data)) {
+    if (typeof v === 'string') fields[k] = {stringValue: v};
+    else if (typeof v === 'number') fields[k] = {integerValue: String(v)};
+    else if (typeof v === 'boolean') fields[k] = {booleanValue: v};
+  }
+  return {fields};
+}
+
+async function iniciar() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  if (!apiKey || !apiKey.startsWith('AIza')) {
+    alert('Ingresá el API Key correcto de Firebase (empieza con AIza...)');
+    return;
+  }
+  document.getElementById('btn-go').disabled = true;
+  const AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
+
+  // PASO 1 — Cargar todos los operarios de Firestore
+  log('Cargando operarios de Firestore...', 'info');
+  let operarios = [];
+  let pageToken = '';
+  let pages = 0;
+  do {
+    const url = FIRESTORE + '/horas_usuarios?pageSize=300' + (pageToken ? '&pageToken='+encodeURIComponent(pageToken) : '');
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      if (d.documents) {
+        for (const doc of d.documents) {
+          const f = doc.fields || {};
+          const id = doc.name.split('/').pop();
+          const dni = f.dni?.stringValue || '';
+          const nombre = f.nombre?.stringValue || '';
+          const passExistente = f.password?.stringValue || '';
+          if (!dni) continue;
+          // Contraseña: la que ya tiene, o últimos 3 del DNI
+          const pass = passExistente || ultimosTres(dni);
+          operarios.push({ id, dni, nombre, pass, passExistente, rol: f.rol?.stringValue||'OPERARIO' });
+        }
+      }
+      pageToken = d.nextPageToken || '';
+    } catch(e) { break; }
+    pages++;
+    await sleep(400);
+  } while (pageToken && pages < 10);
+
+  log(`✓ ${operarios.length} operarios encontrados`, 'ok');
+  document.getElementById('stat-total').textContent = operarios.length;
+
+  // Agregar admins hardcoded
+  operarios.push({ id:'admin_r', dni:'25365716', nombre:'Roberto Admin', pass:'1945', passExistente:'1945', rol:'ADMIN' });
+  operarios.push({ id:'admin_g', dni:'admin', nombre:'Administrador', pass:'admin1234', passExistente:'admin1234', rol:'ADMIN' });
+
+  pb(5);
+
+  // PASO 2 — Crear en Firebase Auth y actualizar contraseña en Firestore
+  log('--- Creando usuarios en Firebase Auth ---', 'info');
+  let ok=0, exist=0, err=0;
+  const sinPass = []; // Para reportar al final los que se les asignó pass automática
+
+  for (let i=0; i<operarios.length; i++) {
+    const op = operarios[i];
+    const email = op.dni + '@megaclean.com.ar';
+    // Firebase Auth requiere mínimo 6 caracteres
+    let pass = op.pass;
+    if (pass.length < 6) pass = pass.repeat(Math.ceil(6/pass.length)).slice(0,6);
+
+    try {
+      const r = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email, password: pass, returnSecureToken: false})
+      });
+      const d = await r.json();
+
+      if (d.error) {
+        if (d.error.message === 'EMAIL_EXISTS') {
+          exist++;
+        } else {
+          err++;
+          log(`Error ${op.nombre}: ${d.error.message}`, 'err');
+        }
+      } else {
+        ok++;
+        // Si no tenía contraseña, guardarla en Firestore
+        if (!op.passExistente && op.id && !op.id.startsWith('admin')) {
+          const mask = 'updateMask.fieldPaths=password';
+          await fetch(`${FIRESTORE}/horas_usuarios/${op.id}?${mask}`, {
+            method: 'PATCH',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(toFS({password: op.pass}))
+          });
+          sinPass.push(`${op.nombre} → contraseña: ${op.pass}`);
+        }
+      }
+    } catch(e) {
+      err++;
+    }
+
+    document.getElementById('stat-ok').textContent = ok;
+    document.getElementById('stat-exist').textContent = exist;
+    document.getElementById('stat-err').textContent = err;
+    pb(5 + ((i+1)/operarios.length)*90);
+
+    if ((i+1) % 20 === 0) {
+      log(`Progreso: ${i+1}/${operarios.length} · OK:${ok} · Existían:${exist} · Err:${err}`, 'ok');
+    }
+    await sleep(80);
+  }
+
+  pb(100);
+  log('', 'info');
+  log('✅ PROCESO COMPLETO', 'ok');
+  log(`Creados: ${ok} · Ya existían: ${exist} · Errores: ${err}`, 'ok');
+
+  if (sinPass.length > 0) {
+    log('', 'info');
+    log('--- Operarios con contraseña asignada automáticamente ---', 'warn');
+    for (const s of sinPass) log(s, 'warn');
+    log('Guardá esta lista — son las contraseñas de acceso de esos operarios', 'warn');
+  }
+
+  log('', 'info');
+  log('Ahora subí el index.html nuevo al repo y el login usa Firebase Auth', 'info');
+}
+</script>
+</body>
+</html>
