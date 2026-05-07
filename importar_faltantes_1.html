@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>MegaClean · Agregar 5 Operarios Faltantes</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f4f7fa;color:#1a2533;padding:24px}
+h1{color:#1a8fcb;font-size:22px;margin-bottom:4px}
+.sub{color:#7a8899;font-size:13px;margin-bottom:20px}
+.btn{background:linear-gradient(135deg,#1a8fcb,#0e6fa0);color:#fff;border:none;border-radius:10px;padding:13px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;max-width:500px;display:block;margin-bottom:10px}
+.log{background:#1a2533;border-radius:10px;padding:14px;height:280px;overflow-y:auto;font-family:monospace;font-size:13px;max-width:500px}
+.ok{color:#27a85a}.err{color:#d63d4a}.info{color:#1a8fcb}
+</style>
+</head>
+<body>
+<h1>MEGACLEAN · AGREGAR 5 FALTANTES</h1>
+<div class="sub">Agrega los 5 operarios que faltan en Firestore</div>
+<button class="btn" onclick="agregar()">▶ AGREGAR 5 OPERARIOS</button>
+<div class="log" id="log"></div>
+<script>
+const API = 'https://firestore.googleapis.com/v1/projects/mega-clean-12f17/databases/(default)/documents';
+const FALTANTES = [
+  {nombre:'ROLDAN, FLORENCIA ELIANA', legajo:'1140', pass:'140', horas:176},
+  {nombre:'SALAS, PEDRO GUSTAVO', legajo:'452', pass:'452', horas:176},
+  {nombre:'SALGUERO, MARISA ANDREA', legajo:'573', pass:'573', horas:176},
+  {nombre:'SOLIZ, JOSE GABRIEL', legajo:'1093', pass:'093', horas:176},
+  {nombre:'SOSA, NATALIA ROMINA', legajo:'1156', pass:'156', horas:176},
+];
+function log(msg, type='info'){
+  const el=document.getElementById('log');
+  const d=document.createElement('div');
+  d.className=type; d.textContent=new Date().toLocaleTimeString()+' — '+msg;
+  el.appendChild(d); el.scrollTop=el.scrollHeight;
+}
+function toFS(data){
+  const fields={};
+  for(const[k,v]of Object.entries(data)){
+    if(typeof v==='string')fields[k]={stringValue:v};
+    else if(typeof v==='number')fields[k]={integerValue:String(v)};
+    else if(typeof v==='boolean')fields[k]={booleanValue:v};
+  }
+  return{fields};
+}
+async function agregar(){
+  let ok=0,err=0;
+  for(const op of FALTANTES){
+    const data={
+      nombre:op.nombre, dni:op.legajo, legajo:op.legajo,
+      password:op.pass, horasRecibo:op.horas,
+      rol:'OPERARIO', tipo:'FIJO', activo:true
+    };
+    const r=await fetch(API+'/horas_usuarios',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(toFS(data))
+    });
+    if(r.ok){ok++;log('✓ '+op.nombre,'ok');}
+    else{err++;log('Error '+op.nombre,'err');}
+    await new Promise(r=>setTimeout(r,200));
+  }
+  log('','info');
+  log('✅ Listo — Agregados: '+ok+' · Errores: '+err,'ok');
+  log('Recargá la app — deberían aparecer 164 operarios','info');
+}
+</script>
+</body>
+</html>
