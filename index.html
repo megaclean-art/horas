@@ -7,8 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<style>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script><style>
   :root {
     --bg: #f4f7fa;
     --surface: #ffffff;
@@ -543,17 +542,25 @@ window.onerror = function(msg, src, line, col, err) {
 };
 
 // ── FIREBASE INIT ──
-firebase.initializeApp(FB_CONFIG);
-const fbAuth = firebase.auth();
+let fbAuth = null;
+if (typeof firebase !== 'undefined') {
+  try {
+    firebase.initializeApp(FB_CONFIG);
+    fbAuth = firebase.auth();
+  } catch(e) {
+    console.warn('Firebase init error:', e);
+  }
+} else {
+  console.warn('Firebase SDK no cargado — modo sin auth');
+}
 
 // Token de autenticación actual
 let _authToken = null;
 
 async function getAuthToken() {
   try {
-    const user = fbAuth.currentUser;
-    if (user) {
-      _authToken = await user.getIdToken();
+    if (fbAuth && fbAuth.currentUser) {
+      _authToken = await fbAuth.currentUser.getIdToken();
       return _authToken;
     }
   } catch(e) {}
@@ -590,6 +597,7 @@ async function doLogin() {
   const email = (dniLower === 'admin' ? 'admin' : dni) + '@megaclean.com.ar';
   try {
     showLoader(true);
+    if (!fbAuth) throw new Error('Firebase no disponible');
     await fbAuth.signInWithEmailAndPassword(email, pass);
     // Auth exitoso — cargar perfil del usuario desde Firestore
     const users = await fsList('horas_usuarios');
@@ -634,7 +642,7 @@ async function doLogin() {
 }
 
 function doLogout() {
-  fbAuth.signOut().catch(()=>{});
+  if (fbAuth) fbAuth.signOut().catch(()=>{});
   currentUser = null;
   if (reloj_interval) clearInterval(reloj_interval);
   // Limpiar cache al salir
@@ -1113,8 +1121,11 @@ async function renderOperarios() {
 }
 
 function filtrarOperarios() {
-  const q = (document.getElementById('op-buscar')?.value || '').toLowerCase();
-  const lista = q ? _operariosAll.filter(o => (o.nombre||'').toLowerCase().includes(q) || String(o.dni||'').includes(q)) : _operariosAll;
+  const q = (document.getElementById('op-buscar')?.value || '').toLowerCase().replace(/,/g,' ');
+  const lista = q ? _operariosAll.filter(o => {
+    const nombre = (o.nombre||'').toLowerCase().replace(/,/g,' ');
+    return nombre.includes(q) || String(o.dni||'').includes(q) || String(o.legajo||'').includes(q);
+  }) : _operariosAll;
   const cont = document.getElementById('op-lista');
   if (!cont) return;
   cont.innerHTML = `<div class="card-section">
@@ -1342,7 +1353,7 @@ function filtrarServicios() {
           <div class="list-item-name">${s.cliente || '—'} ${s.codigo ? `<span style="color:var(--text3);font-size:11px;font-weight:400">#${s.codigo}</span>` : ''}${multiTag}</div>
           <div class="list-item-sub">📍 ${s.direccion || '<em style="color:var(--text3)">Sin dirección</em>'}</div>
           <div class="list-item-sub">
-            ${(s.dias||[]).join(' · ')} &nbsp;·&nbsp; ${s.horaInicio||'--:--'} – ${s.horaFin||'--:--'} &nbsp;·&nbsp; ${s.horasContratadas||0}hs
+            ${(s.dias||[]).join(' · ')} &nbsp;·&nbsp; ${s.horaInicio||'--:--'} – ${s.horaFin||'--:--'} &nbsp;·&nbsp; <strong>${((Number(s.horasPorSemana)||((Number(s.horasContratadas)||0)*(s.dias?.length||0)))*4).toFixed(0)}hs/mes</strong>
             ${supLabel ? `&nbsp;·&nbsp; <span style="color:var(--text3)">🏷 ${supLabel}</span>` : ''}
           </div>
           <div style="margin-top:4px">
@@ -2131,6 +2142,31 @@ function cargarDatosServicio2() {
   if (opt.dataset.hs) document.getElementById('cob-hs').value = opt.dataset.hs;
 }
 
+function filtrarOpsCob() {
+  const q = (document.getElementById('cob-op-buscar')?.value || '').toLowerCase();
+  document.querySelectorAll('#cob-op option').forEach(opt => {
+    opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function filtrarSrvCob() {
+  const q = (document.getElementById('cob-srv-buscar')?.value || '').toLowerCase();
+  document.querySelectorAll('#cob-srv option').forEach(opt => {
+    opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function toggleDiaCob(dia) {
+  const btn = document.getElementById('cob-dia-' + dia);
+  if (_diasSelCob.includes(dia)) {
+    _diasSelCob = _diasSelCob.filter(d => d !== dia);
+    btn?.classList.remove('sel');
+  } else {
+    _diasSelCob.push(dia);
+    btn?.classList.add('sel');
+  }
+}
+
 async function guardarCobertura(id = '') {
   const opSel = document.getElementById('cob-op');
   const motivo = document.getElementById('cob-motivo').value;
@@ -2811,7 +2847,12 @@ function filtrarRepOp() {
   // Protección: si los datos no están listos todavía, no hacer nada
   if (!window._rpOps) return;
   const q = (document.getElementById('rp-op-q')?.value||'').toLowerCase();
-  const lista = q ? window._rpOps.filter(r=>(r.op.nombre||'').toLowerCase().includes(q)||(r.op.legajo||'').includes(q)) : window._rpOps;
+  const lista = q ? window._rpOps.filter(r => {
+    const nombre = (r.op.nombre||'').toLowerCase().replace(/,/g,' ');
+    const legajo = r.op.legajo||'';
+    const qNorm = q.replace(/,/g,' ');
+    return nombre.includes(qNorm) || legajo.includes(q);
+  }) : window._rpOps;
   const cont = document.getElementById('rp-op-lista');
   if (!cont) return;
   if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`; return; }
