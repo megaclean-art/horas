@@ -3190,16 +3190,17 @@ async function renderReporteOperario() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Por Operario</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
 
-  const [operarios, servicios, fichadas] = await Promise.all([
-    fsList('horas_usuarios'), fsList('horas_servicios'), fsList('horas_fichadas')
+  const [operarios, servicios, fichadas, coberturas] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_servicios'), fsList('horas_fichadas'), fsList('horas_coberturas')
   ]);
   const mes = isoHoy().slice(0,7);
+  const hoy = isoHoy();
   const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mes));
 
   c.innerHTML = `
     <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
     <div class="section-title">👷 Por Operario</div>
-    <div class="section-sub">Servicios asignados y horas del mes</div>
+    <div class="section-sub">Cuenta corriente de horas · ${mes}</div>
     <input id="rp-op-q" placeholder="🔍 Buscar operario o legajo..." oninput="filtrarRepOp()"
       style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
     <div id="rp-op-lista"></div>`;
@@ -3207,29 +3208,90 @@ async function renderReporteOperario() {
   window._rpOps = operarios.filter(o => o.rol === 'OPERARIO').map(o => {
     const srvs = servicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
     const hsRecibo = Number(o.horasRecibo) || 0;
-    const hsReales = fichadasMes.filter(f=>f.operarioId===o._id).reduce((s,f)=>s+(f.horasTrabajadas||0),0);
-    // Fijas: usar horasPorSemana si existe, sino calcular
+    const fichadasOp = fichadasMes.filter(f=>f.operarioId===o._id);
+    const hsReales = fichadasOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
+
+    // Horas fijas
     const hsFijas = srvs.reduce((sum,s) => {
       const hsS = Number(s.horasPorSemana) || (Number(s.horasContratadas)||0)*(s.dias?.length||0);
       return sum + hsS * 4;
     }, 0);
-    // Total = fijas + variables fichadas
-    const hsTotales = hsFijas + hsReales;
-    return { op: o, srvs, hsRecibo, hsFijas, hsVariables: hsReales, hsFijas_display: hsFijas, hsTotales };
+
+    // Coberturas donde este operario es REEMPLAZANTE en el mes
+    const cobsReemplazante = coberturas.filter(cob =>
+      cob.reemplazanteId === o._id &&
+      cob.estado === 'ACTIVA' &&
+      cob.fechaInicio?.slice(0,7) === mes
+    );
+
+    // Calcular horas de cobertura día por día (exacto, no promedio)
+    const detalleCoberturas = [];
+    let hsCobTotal = 0;
+    let hsCobSinFichar = 0;
+
+    for (const cob of cobsReemplazante) {
+      const fi = new Date(cob.fechaInicio + 'T12:00:00');
+      const ff = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date(hoy + 'T12:00:00');
+      const diasCob = cob.dias || [];
+      const hsPorDia = Number(cob.horasContratadas) || 0;
+
+      // Iterar cada día del período y verificar si ese día de la semana está en la cobertura
+      let hsEstaCob = 0;
+      let diasTrabajados = [];
+      const cur = new Date(fi);
+      while (cur <= ff) {
+        const diaSemIdx = cur.getDay(); // 0=dom, 1=lun...
+        const DIAS_JS_MAP = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
+        const diaStr = DIAS_JS_MAP[diaSemIdx];
+        if (diasCob.includes(diaStr)) {
+          // Verificar horario específico del día si existe
+          let hsEste = hsPorDia;
+          if (cob.horariosPorDia) {
+            try {
+              const hp = typeof cob.horariosPorDia==='string'?JSON.parse(cob.horariosPorDia):cob.horariosPorDia;
+              if (hp[diaStr]?.hs) hsEste = Number(hp[diaStr].hs);
+            } catch{}
+          }
+          hsEstaCob += hsEste;
+          diasTrabajados.push({ fecha: cur.toISOString().slice(0,10), dia: diaStr, hs: hsEste });
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      // ¿Fichó en esta cobertura?
+      const fichoCob = fichadasOp.some(f => f.coberturaId === cob._id);
+      hsCobTotal += hsEstaCob;
+      if (!fichoCob) hsCobSinFichar += hsEstaCob;
+
+      if (hsEstaCob > 0) {
+        detalleCoberturas.push({
+          cob, hsEstaCob, diasTrabajados, fichoCob,
+          cliente: cob.clienteNombre || '—',
+          ausenteNombre: cob.ausenteNombre || '—'
+        });
+      }
+    }
+
+    const hsTotal = hsFijas + hsReales + hsCobSinFichar;
+    const diff = hsTotal - hsRecibo;
+
+    return {
+      op: o, srvs, hsRecibo, hsFijas, hsVariables: hsReales,
+      hsCobTotal, hsCobSinFichar, detalleCoberturas,
+      hsTotal, diff
+    };
   }).sort((a,b)=>a.op.nombre.localeCompare(b.op.nombre));
 
   filtrarRepOp();
 }
 
 function filtrarRepOp() {
-  // Protección: si los datos no están listos todavía, no hacer nada
   if (!window._rpOps) return;
   const q = (document.getElementById('rp-op-q')?.value||'').toLowerCase();
   const lista = q ? window._rpOps.filter(r => {
     const nombre = (r.op.nombre||'').toLowerCase().replace(/,/g,' ');
-    const legajo = r.op.legajo||'';
     const qNorm = q.replace(/,/g,' ');
-    return nombre.includes(qNorm) || legajo.includes(q);
+    return nombre.includes(qNorm) || (r.op.legajo||'').includes(q);
   }) : window._rpOps;
   const cont = document.getElementById('rp-op-lista');
   if (!cont) return;
@@ -3240,47 +3302,100 @@ function filtrarRepOp() {
     const nombre = (r.op.nombre||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
     const legajo = r.op.legajo||'—';
     const tipo = r.op.tipo||'FIJO';
-    const supervisor = (r.op.supervisor||'').replace(/'/g,'&#39;');
-    const hsReales = r.hsVariables || 0;
     const hsFijas = r.hsFijas || 0;
+    const hsVariables = r.hsVariables || 0;
     const hsRecibo = r.hsRecibo || 0;
-    const diff = (hsFijas + hsReales) - hsRecibo;
+    const hsCob = r.hsCobSinFichar || 0;
+    const hsTotal = r.hsTotal || 0;
+    const diff = r.diff || 0;
+    const diffColor = diff < 0 ? 'var(--red)' : diff > 0 ? 'var(--green)' : 'var(--text3)';
+
     return `
     <div class="card-section" style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <!-- Encabezado -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
         <div>
           <div style="font-family:var(--font-display);font-size:18px;font-weight:700">${nombre}</div>
-          <div style="font-size:12px;color:var(--text3)">Leg. ${legajo} · ${tipo} · ${supervisor}</div>
+          <div style="font-size:12px;color:var(--text3)">Leg. ${legajo} · ${tipo}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:11px;color:var(--text3)">Recibo</div>
-          <div style="font-family:var(--font-display);font-size:20px;font-weight:900;color:var(--accent)">${hsRecibo}hs</div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Recibo</div>
+          <div style="font-family:var(--font-display);font-size:22px;font-weight:900;color:var(--accent)">${hsRecibo}hs</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
-        <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Hs Fijas</div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${hsFijas.toFixed(0)}</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Hs Fichadas</div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${hsReales.toFixed(1)}</div>
-        </div>
-        <div style="background:${diff<0?'var(--red-light)':diff>0?'var(--green-light)':'var(--surface2)'};border-radius:8px;padding:8px;text-align:center">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Diferencia</div>
-          <div style="font-size:18px;font-weight:700;color:${diff<0?'var(--red)':diff>0?'var(--green)':'var(--text3)'}">${diff>=0?'+':''}${diff.toFixed(0)}</div>
+
+      <!-- Resumen cuenta corriente -->
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Cuenta corriente del mes</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--text2)">Hs fijas (servicios × 4 sem)</span>
+            <span style="font-weight:700">${hsFijas.toFixed(0)}hs</span>
+          </div>
+          ${hsVariables > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--text2)">Hs variables fichadas</span>
+            <span style="font-weight:700;color:var(--green)">+${hsVariables.toFixed(1)}hs</span>
+          </div>` : ''}
+          ${hsCob > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--yellow)">⚠ Hs cobertura estimadas (sin fichar)</span>
+            <span style="font-weight:700;color:var(--yellow)">+${hsCob.toFixed(1)}hs *</span>
+          </div>` : ''}
+          <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px;display:flex;justify-content:space-between;font-size:15px">
+            <span style="font-weight:700">Total trabajado</span>
+            <span style="font-family:var(--font-display);font-size:18px;font-weight:900">${hsTotal.toFixed(1)}hs</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:14px">
+            <span style="color:var(--text3)">Diferencia vs recibo</span>
+            <span style="font-family:var(--font-display);font-size:18px;font-weight:900;color:${diffColor}">${diff>=0?'+':''}${diff.toFixed(1)}hs</span>
+          </div>
         </div>
       </div>
+
+      <!-- Detalle coberturas -->
+      ${r.detalleCoberturas.length > 0 ? `
+      <div style="margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">
+          Detalle coberturas como reemplazante
+        </div>
+        ${r.detalleCoberturas.map(dc => `
+          <div style="background:${dc.fichoCob?'var(--green-light)':'rgba(224,123,42,.08)'};border:1px solid ${dc.fichoCob?'rgba(39,168,90,.3)':'rgba(224,123,42,.3)'};border-radius:8px;padding:10px 12px;margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <div style="font-size:13px;font-weight:700">🏢 ${dc.cliente}</div>
+                <div style="font-size:11px;color:var(--text3)">Ausente: ${dc.ausenteNombre}</div>
+              </div>
+              <div style="text-align:right">
+                <span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;background:${dc.fichoCob?'var(--green)':'var(--yellow)'};color:#fff">${dc.fichoCob?'✓ FICHADO':'⚠ SIN FICHAR'}</span>
+                <div style="font-family:var(--font-display);font-size:18px;font-weight:900;color:${dc.fichoCob?'var(--green)':'var(--yellow)'};margin-top:2px">${dc.hsEstaCob.toFixed(1)}hs</div>
+              </div>
+            </div>
+            <!-- Detalle por día -->
+            <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+              ${dc.diasTrabajados.map(d => `
+                <div style="background:rgba(255,255,255,.7);border-radius:6px;padding:3px 8px;font-size:11px">
+                  <span style="font-weight:700;color:var(--accent)">${d.dia}</span>
+                  <span style="color:var(--text2)"> ${d.fecha.slice(8)} · ${d.hs}hs</span>
+                </div>`).join('')}
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <!-- Servicios fijos -->
       ${r.srvs.length > 0 ? `
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Servicios asignados (${r.srvs.length})</div>
-      ${r.srvs.map(s=>`<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border)">🏢 ${(s.cliente||'').replace(/'/g,'&#39;')} · ${(s.dias||[]).join('-')} · ${s.horaInicio||''}–${s.horaFin||''} · ${s.horasContratadas||0}hs</div>`).join('')}
-      ` : `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicios asignados</div>`}
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">
+        Servicios fijos (${r.srvs.length})
+      </div>
+      ${r.srvs.map(s=>`<div style="font-size:12px;color:var(--text2);padding:5px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <span>🏢 ${(s.cliente||'').replace(/'/g,'&#39;')} · ${(s.dias||[]).join('-')} · ${s.horaInicio||''}–${s.horaFin||''}</span>
+        <span style="font-weight:700;color:var(--accent);white-space:nowrap;margin-left:8px">${((Number(s.horasPorSemana)||(Number(s.horasContratadas)||0)*(s.dias?.length||0))*4).toFixed(0)}hs/mes</span>
+      </div>`).join('')}
+      ` : `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicios fijos asignados</div>`}
     </div>`;
   }).join('');
   } catch(e) {
     console.error('filtrarRepOp error:', e);
     const cont2 = document.getElementById('rp-op-lista');
-    if (cont2) cont2.innerHTML = `<div class="card-section"><div style="color:var(--red);padding:16px">Error al mostrar resultados. Intentá de nuevo.</div></div>`;
+    if (cont2) cont2.innerHTML = `<div class="card-section"><div style="color:var(--red);padding:16px">Error al mostrar. Intentá de nuevo.</div></div>`;
   }
 }
 
