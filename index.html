@@ -1994,23 +1994,21 @@ async function renderGestionAccesos() {
 }
 
 function renderFilaAcceso(u) {
-  const rolColor = u.rol==='ADMIN'?'var(--accent)':u.rol==='SUPERVISOR'?'var(--yellow)':'var(--text3)';
   const tienePass = !!u.password;
   return `<div class="card-section" style="margin-bottom:6px;padding:10px 14px" id="acc-row-${u._id}">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:600;color:var(--text)">${u.nombre||'—'}</div>
         <div style="font-size:12px;color:var(--text3);margin-top:2px">
-          DNI/Usuario: <strong>${u.dni||'—'}</strong>
-          · Leg: ${u.legajo||'—'}
+          Usuario: <strong>${u.dni||'—'}</strong>
           · <span style="color:${tienePass?'var(--green)':'var(--red)'}">${tienePass?'✓ Con contraseña':'⚠ Sin contraseña'}</span>
         </div>
         ${tienePass ? `<div style="font-size:11px;color:var(--text3);margin-top:1px">Contraseña: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">${u.password}</code></div>` : ''}
-        ${u.supervisor ? `<div style="font-size:11px;color:var(--yellow);margin-top:1px">Supervisión: ${u.supervisor}</div>` : ''}
+        ${u.supervisor ? `<div style="font-size:11px;color:var(--yellow);margin-top:2px">🏷 Supervisión: <strong>${u.supervisor}</strong></div>` : ''}
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0">
-        <button class="btn-icon" title="Editar acceso" onclick="modalEditarAcceso('${u._id}')">✏️</button>
-        <button class="btn-icon" title="Cambiar contraseña" onclick="modalCambiarPass('${u._id}','${(u.nombre||'').replace(/'/g,'')}','${u.dni||''}')">🔑</button>
+        <button class="btn-icon edit" title="Editar acceso" onclick="modalEditarAcceso('${u._id}')">✏️</button>
+        <button class="btn-icon" title="Eliminar acceso" onclick="eliminarAcceso('${u._id}','${(u.nombre||'').replace(/'/g,'')}','${u.rol||''}')">🗑</button>
       </div>
     </div>
   </div>`;
@@ -2043,6 +2041,23 @@ function filtrarAccesos() {
       }
     }
   });
+}
+
+async function eliminarAcceso(id, nombre, rol) {
+  const msg = rol === 'ADMIN'
+    ? `⚠ Vas a eliminar al administrador "${nombre}". ¿Confirmás?`
+    : rol === 'SUPERVISOR'
+    ? `Vas a eliminar al supervisor "${nombre}" y su acceso al sistema. ¿Confirmás?`
+    : `Vas a eliminar el acceso de "${nombre}" al sistema. El perfil del operario se mantiene. ¿Confirmás?`;
+
+  if (!confirm(msg)) return;
+
+  showLoader(true);
+  await fsDelete('horas_usuarios', id);
+  invalidarCache('horas_usuarios');
+  showLoader(false);
+  toast(`✓ Acceso de ${nombre} eliminado`, 'ok');
+  renderGestionAccesos();
 }
 
 // ── MODAL EDITAR ACCESO ──
