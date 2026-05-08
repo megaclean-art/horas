@@ -13,7 +13,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script><style>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<style>
   :root {
     --bg: #f4f7fa;
     --surface: #ffffff;
@@ -549,16 +550,21 @@ window.onerror = function(msg, src, line, col, err) {
 
 // ── FIREBASE INIT ──
 let fbAuth = null;
-if (typeof firebase !== 'undefined') {
-  try {
-    firebase.initializeApp(FB_CONFIG);
-    fbAuth = firebase.auth();
-  } catch(e) {
-    console.warn('Firebase init error:', e);
+function initFirebase() {
+  if (typeof firebase !== 'undefined') {
+    try {
+      if (!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+      fbAuth = firebase.auth();
+    } catch(e) {
+      console.warn('Firebase init error:', e);
+    }
+  } else {
+    console.warn('Firebase SDK no cargado — modo sin auth');
   }
-} else {
-  console.warn('Firebase SDK no cargado — modo sin auth');
 }
+// Intentar inicializar ahora y también cuando cargue la página
+initFirebase();
+if (!fbAuth) window.addEventListener('load', initFirebase);
 
 // Token de autenticación actual
 let _authToken = null;
@@ -1119,8 +1125,15 @@ async function renderOperarios() {
     <div class="section-title">Operarios</div>
     <div class="section-sub">Gestión de usuarios del sistema</div>
     <button class="btn-primary" style="margin-bottom:14px" onclick="modalOperario()">+ NUEVO OPERARIO</button>
-    <input id="op-buscar" placeholder="🔍 Buscar operario o DNI..." oninput="filtrarOperarios()"
-      style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <input id="op-buscar" placeholder="🔍 Buscar operario o DNI..." oninput="filtrarOperarios()"
+        style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+      <select id="op-filtro-barrio" onchange="filtrarOperarios()"
+        style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos los barrios</option>
+        ${[...new Set(_operariosAll.map(o=>o.barrio).filter(Boolean))].sort().map(b=>`<option value="${b}">${b}</option>`).join('')}
+      </select>
+    </div>
     <div id="op-lista"></div>`;
 
   filtrarOperarios();
@@ -1128,10 +1141,13 @@ async function renderOperarios() {
 
 function filtrarOperarios() {
   const q = (document.getElementById('op-buscar')?.value || '').toLowerCase().replace(/,/g,' ');
-  const lista = q ? _operariosAll.filter(o => {
+  const filtroBarrio = document.getElementById('op-filtro-barrio')?.value || '';
+  let lista = _operariosAll;
+  if (q) lista = lista.filter(o => {
     const nombre = (o.nombre||'').toLowerCase().replace(/,/g,' ');
     return nombre.includes(q) || String(o.dni||'').includes(q) || String(o.legajo||'').includes(q);
-  }) : _operariosAll;
+  });
+  if (filtroBarrio) lista = lista.filter(o => o.barrio === filtroBarrio);
   const cont = document.getElementById('op-lista');
   if (!cont) return;
   cont.innerHTML = `<div class="card-section">
@@ -1145,16 +1161,77 @@ function filtrarOperarios() {
               DNI: ${o.dni||'<em style="color:var(--text3)">Sin cargar</em>'}
               &nbsp;·&nbsp; <span class="pill ${o.rol==='ADMIN'?'pill-blue':o.rol==='SUPERVISOR'?'pill-yellow':'pill-gray'}">${o.rol||'OPERARIO'}</span>
               &nbsp;·&nbsp; ${o.tipo==='FIJO'?`Fijo ${o.horasSemana||0}hs/sem`:'Variable'}
+              ${o.barrio ? `&nbsp;·&nbsp; 📍 ${o.barrio}` : ''}
               ${!o.password || !o.dni ? '&nbsp;·&nbsp; <span style="color:var(--yellow)">⚠ Incompleto</span>' : ''}
             </div>
           </div>
           <div class="list-item-actions">
+            <button class="btn-icon" title="Ver detalle" onclick="verOperario('${o._id}')">👁</button>
             <button class="btn-icon edit" title="Editar" onclick="modalOperario('${o._id}')">✏️</button>
             <button class="btn-icon" title="Eliminar" onclick="eliminarOperario('${o._id}','${o.nombre}')">🗑</button>
           </div>
         </div>`).join('')
     }
   </div>`;
+}
+
+async function verOperario(id) {
+  const o = await fsGet('horas_usuarios', id);
+  if (!o) return toast('No se pudo cargar el operario', 'error');
+  const servicios = await fsList('horas_servicios');
+  const srvs = servicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(id));
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">👁 ${o.nombre}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Legajo</div>
+            <div style="font-size:18px;font-weight:700">${o.legajo||'—'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">DNI</div>
+            <div style="font-size:18px;font-weight:700">${o.dni||'—'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Rol</div>
+            <div style="font-size:16px;font-weight:700">${o.rol||'OPERARIO'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Tipo</div>
+            <div style="font-size:16px;font-weight:700">${o.tipo||'FIJO'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Hs Recibo</div>
+            <div style="font-size:18px;font-weight:700;color:var(--accent)">${o.horasRecibo||'—'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Contraseña</div>
+            <div style="font-size:16px;font-weight:700">${o.password||'—'}</div>
+          </div>
+        </div>
+        ${o.direccion||o.barrio ? `
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:14px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Domicilio</div>
+          <div style="font-size:14px;font-weight:600">${o.direccion||'—'} ${o.barrio?'· '+o.barrio:''}</div>
+        </div>` : ''}
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">
+          Servicios asignados (${srvs.length})
+        </div>
+        ${srvs.length === 0 ? '<div style="font-size:13px;color:var(--text3);font-style:italic;margin-bottom:14px">Sin servicios asignados</div>' :
+          srvs.map(s=>`<div style="background:var(--accent-light);border-radius:8px;padding:10px 12px;margin-bottom:6px;border:1px solid rgba(26,143,203,.2)">
+            <div style="font-weight:700;font-size:14px">${s.cliente||'—'} <span style="font-size:11px;color:var(--text3)">#${s.codigo||'—'}</span></div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">📍 ${s.direccion||'—'}</div>
+            <div style="font-size:12px;color:var(--accent);margin-top:2px">${(s.dias||[]).join(' · ')} · ${s.horaInicio||''}–${s.horaFin||''}</div>
+          </div>`).join('')}
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CERRAR</button>
+          <button class="btn-primary" onclick="cerrarModal();modalOperario('${id}')">✏️ EDITAR</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 async function modalOperario(id = null) {
@@ -1205,6 +1282,16 @@ async function modalOperario(id = null) {
           <label>Legajo Skylab <span style="color:var(--text3);font-size:10px">(opcional)</span></label>
           <input id="op-legajo" placeholder="Ej: 00064" value="${o.legajo||''}">
         </div>
+        <div class="form-row">
+          <div class="field-sm">
+            <label>Dirección</label>
+            <input id="op-direccion" placeholder="Ej: Av. Colón 1234" value="${o.direccion||''}">
+          </div>
+          <div class="field-sm">
+            <label>Barrio</label>
+            <input id="op-barrio" placeholder="Ej: Panamericano" value="${o.barrio||''}">
+          </div>
+        </div>
         <div class="modal-actions">
           <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
           <button class="btn-primary" onclick="guardarOperario('${id||''}')">
@@ -1230,6 +1317,8 @@ async function guardarOperario(id = '') {
   const hs = Number(document.getElementById('op-hs')?.value || 0);
   const horasRecibo = Number(document.getElementById('op-recibo')?.value || 0);
   const legajo = document.getElementById('op-legajo')?.value.trim() || '';
+  const direccion = document.getElementById('op-direccion')?.value.trim() || '';
+  const barrio = document.getElementById('op-barrio')?.value.trim() || '';
 
   if (!nombre) return toast('El nombre es obligatorio', 'warn');
   if (!id && !pass) return toast('La contraseña es obligatoria para usuarios nuevos', 'warn');
@@ -1237,6 +1326,8 @@ async function guardarOperario(id = '') {
   const data = { nombre, dni, rol, tipo, horasSemana: hs, activo: true };
   if (horasRecibo) data.horasRecibo = horasRecibo;
   if (legajo) data.legajo = legajo;
+  if (direccion) data.direccion = direccion;
+  if (barrio) data.barrio = barrio;
   if (pass) data.password = pass;
 
   if (id) {
@@ -1274,24 +1365,32 @@ async function renderServicios() {
   _serviciosCache = servicios;
   _operariosCache = operarios;
 
-  // Supervisores únicos para filtro
+  // Supervisores y admins únicos para filtro
   const supervisores = [...new Set(servicios.map(s => s.supervisor || s.idSupervisor).filter(Boolean))].sort();
+  const admins = [...new Set(servicios.map(s => s.adminCliente).filter(Boolean))].sort();
 
   c.innerHTML = `
     <div class="section-title">Servicios</div>
     <div class="section-sub">ABM de objetivos y asignaciones</div>
     <button class="btn-primary" style="margin-bottom:14px" onclick="modalServicio()">+ NUEVO SERVICIO</button>
 
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
       <input id="srv-buscar" placeholder="🔍 Buscar cliente..." oninput="filtrarServicios()"
         style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
-      <select id="srv-filtro-sup" onchange="filtrarServicios()"
+      <select id="srv-filtro-admin" onchange="filtrarServicios()"
         style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos los administradores</option>
+        ${admins.map(a=>`<option value="${a}">${a}</option>`).join('')}
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <select id="srv-filtro-sup" onchange="filtrarServicios()"
+        style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
         <option value="">Todos los supervisores</option>
         ${supervisores.map(s=>`<option value="${s}">${s}</option>`).join('')}
       </select>
       <select id="srv-filtro-op" onchange="filtrarServicios()"
-        style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
         <option value="">Todos los operarios</option>
         ${operarios.filter(o=>o.rol==='OPERARIO').sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(o=>`<option value="${o._id}">${o.nombre}</option>`).join('')}
       </select>
@@ -1306,10 +1405,12 @@ function filtrarServicios() {
   const buscar = (document.getElementById('srv-buscar')?.value || '').toLowerCase();
   const filtroSup = document.getElementById('srv-filtro-sup')?.value || '';
   const filtroOp = document.getElementById('srv-filtro-op')?.value || '';
+  const filtroAdmin = document.getElementById('srv-filtro-admin')?.value || '';
 
   let lista = _serviciosCache;
-  if (buscar) lista = lista.filter(s => (s.cliente||'').toLowerCase().includes(buscar) || (s.codigo||'').includes(buscar) || (s.direccion||'').toLowerCase().includes(buscar));
+  if (buscar) lista = lista.filter(s => (s.cliente||'').toLowerCase().includes(buscar) || (s.codigo||'').includes(buscar) || (s.direccion||'').toLowerCase().includes(buscar) || (s.adminCliente||'').toLowerCase().includes(buscar));
   if (filtroSup) lista = lista.filter(s => (s.supervisor||s.idSupervisor||'') === filtroSup);
+  if (filtroAdmin) lista = lista.filter(s => s.adminCliente === filtroAdmin);
   if (filtroOp) lista = lista.filter(s => {
     const ops = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
     return ops.includes(filtroOp);
@@ -1370,6 +1471,7 @@ function filtrarServicios() {
           </div>
         </div>
         <div class="list-item-actions" style="flex-shrink:0">
+          <button class="btn-icon" title="Ver detalle" onclick="verServicio(${JSON.stringify(s._ids)})">👁</button>
           <button class="btn-icon edit" title="Editar" onclick="modalServicio('${primerIdStr}')">✏️</button>
           <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>
         </div>
@@ -1418,6 +1520,10 @@ async function modalServicio(id = null) {
         <div class="field-sm"><label>Nombre del cliente / objetivo</label><input id="sv-cliente" placeholder="Ej: Edificio Los Arcos" value="${s.cliente||''}"></div>
         <div class="field-sm"><label>Dirección</label><input id="sv-dir" placeholder="Ej: Av. Colón 1234, Córdoba" value="${s.direccion||''}"></div>
         <div class="field-sm"><label>Supervisor (nombre)</label><input id="sv-sup" placeholder="Ej: SUPERVISION CENTRICA" value="${s.supervisor||''}"></div>
+        <div class="field-sm">
+          <label>Cliente / Administrador <span style="color:var(--text3);font-size:10px">(para agrupar servicios del mismo cliente)</span></label>
+          <input id="sv-admin" placeholder="Ej: Adm Olocco" value="${s.adminCliente||''}">
+        </div>
 
         <!-- DÍAS CON HORARIO POR DÍA -->
         <div class="field-sm">
@@ -1474,35 +1580,99 @@ async function modalServicio(id = null) {
 }
 
 function renderFilaDia(dia, horario) {
-  return `<div id="fila-dia-${dia}" style="display:grid;grid-template-columns:44px 1fr 1fr 80px;gap:6px;align-items:center;margin-bottom:8px;background:var(--accent-light);border:1px solid rgba(26,143,203,.2);border-radius:8px;padding:8px 10px">
-    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent);text-align:center">${dia}</div>
-    <div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Inicio</div>
-      <input type="time" id="h-inicio-${dia}" value="${horario.inicio||''}"
-        oninput="calcularHsDia('${dia}')"
-        style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+  const tieneTurno2 = horario.inicio2 || horario.fin2;
+  return `<div id="fila-dia-${dia}" style="background:var(--accent-light);border:1px solid rgba(26,143,203,.2);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+    <!-- Turno 1 -->
+    <div style="display:grid;grid-template-columns:44px 1fr 1fr 80px 36px;gap:6px;align-items:center;margin-bottom:${tieneTurno2?'8px':'0'}">
+      <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent);text-align:center">${dia}</div>
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Inicio</div>
+        <input type="time" id="h-inicio-${dia}" value="${horario.inicio||''}"
+          oninput="calcularHsDia('${dia}')"
+          style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+      </div>
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Fin</div>
+        <input type="time" id="h-fin-${dia}" value="${horario.fin||''}"
+          oninput="calcularHsDia('${dia}')"
+          style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+      </div>
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Hs</div>
+        <input type="number" id="h-hs-${dia}" value="${horario.hs||''}" step="0.5" placeholder="0"
+          style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+      </div>
+      <div style="padding-top:16px;text-align:center">
+        <button onclick="toggleTurno2('${dia}')" id="btn-t2-${dia}" title="${tieneTurno2?'Quitar turno tarde':'Agregar turno tarde'}"
+          style="background:${tieneTurno2?'var(--accent)':'var(--surface2)'};color:${tieneTurno2?'#fff':'var(--text3)'};border:1px solid var(--border);border-radius:6px;width:28px;height:28px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center">
+          ${tieneTurno2?'−':'+'}
+        </button>
+      </div>
     </div>
-    <div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Fin</div>
-      <input type="time" id="h-fin-${dia}" value="${horario.fin||''}"
-        oninput="calcularHsDia('${dia}')"
-        style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
-    </div>
-    <div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:3px">Hs</div>
-      <input type="number" id="h-hs-${dia}" value="${horario.hs||''}" step="0.5" placeholder="0"
-        style="width:100%;background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+    <!-- Turno 2 (tarde) -->
+    <div id="turno2-${dia}" style="display:${tieneTurno2?'grid':'none'};grid-template-columns:44px 1fr 1fr 80px 36px;gap:6px;align-items:center">
+      <div style="text-align:center;font-size:9px;font-weight:700;color:var(--yellow);text-transform:uppercase">T2</div>
+      <div>
+        <input type="time" id="h-inicio2-${dia}" value="${horario.inicio2||''}"
+          oninput="calcularHsDia('${dia}')"
+          style="width:100%;background:#fff;border:1px solid rgba(224,123,42,.4);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+      </div>
+      <div>
+        <input type="time" id="h-fin2-${dia}" value="${horario.fin2||''}"
+          oninput="calcularHsDia('${dia}')"
+          style="width:100%;background:#fff;border:1px solid rgba(224,123,42,.4);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+      </div>
+      <div>
+        <input type="number" id="h-hs2-${dia}" value="${horario.hs2||''}" step="0.5" placeholder="0"
+          style="width:100%;background:#fff;border:1px solid rgba(224,123,42,.4);color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;outline:none">
+      </div>
+      <div></div>
     </div>
   </div>`;
+}
+
+function toggleTurno2(dia) {
+  const t2 = document.getElementById(`turno2-${dia}`);
+  const btn = document.getElementById(`btn-t2-${dia}`);
+  if (!t2) return;
+  const visible = t2.style.display !== 'none';
+  if (visible) {
+    t2.style.display = 'none';
+    btn.textContent = '+';
+    btn.style.background = 'var(--surface2)';
+    btn.style.color = 'var(--text3)';
+    // Limpiar campos turno 2
+    ['h-inicio2-','h-fin2-','h-hs2-'].forEach(p => {
+      const el = document.getElementById(p+dia);
+      if (el) el.value = '';
+    });
+  } else {
+    t2.style.display = 'grid';
+    btn.textContent = '−';
+    btn.style.background = 'var(--accent)';
+    btn.style.color = '#fff';
+  }
+  calcularHsDia(dia);
 }
 
 function calcularHsDia(dia) {
   const ini = document.getElementById(`h-inicio-${dia}`)?.value;
   const fin = document.getElementById(`h-fin-${dia}`)?.value;
+  const ini2 = document.getElementById(`h-inicio2-${dia}`)?.value;
+  const fin2 = document.getElementById(`h-fin2-${dia}`)?.value;
+  let totalHs = 0;
   if (ini && fin) {
     const hs = diffHoras(ini, fin);
-    if (hs > 0) document.getElementById(`h-hs-${dia}`).value = hs.toFixed(1);
+    if (hs > 0) totalHs += hs;
   }
+  if (ini2 && fin2) {
+    const hs2 = diffHoras(ini2, fin2);
+    if (hs2 > 0) {
+      totalHs += hs2;
+      document.getElementById(`h-hs2-${dia}`).value = hs2.toFixed(1);
+    }
+  }
+  if (totalHs > 0) document.getElementById(`h-hs-${dia}`).value = totalHs.toFixed(1);
 }
 
 // Obtener el último horario cargado en los días ya seleccionados
@@ -1585,6 +1755,7 @@ async function guardarServicio(id = '') {
   const codigo = document.getElementById('sv-codigo').value.trim();
   const idSupervisor = document.getElementById('sv-idsup').value.trim();
   const supervisor = document.getElementById('sv-sup').value.trim();
+  const adminCliente = document.getElementById('sv-admin')?.value.trim() || '';
   const radioGps = Number(document.getElementById('sv-radio').value) || 300;
   const operariosSelec = Array.from(document.querySelectorAll('[id^="chk-"]')).filter(c=>c.checked).map(c=>c.id.replace('chk-',''));
 
@@ -1598,7 +1769,11 @@ async function guardarServicio(id = '') {
     const inicio = document.getElementById(`h-inicio-${dia}`)?.value || '';
     const fin = document.getElementById(`h-fin-${dia}`)?.value || '';
     const hs = Number(document.getElementById(`h-hs-${dia}`)?.value) || 0;
+    const inicio2 = document.getElementById(`h-inicio2-${dia}`)?.value || '';
+    const fin2 = document.getElementById(`h-fin2-${dia}`)?.value || '';
+    const hs2 = Number(document.getElementById(`h-hs2-${dia}`)?.value) || 0;
     horariosPorDia[dia] = { inicio, fin, hs };
+    if (inicio2 || fin2) horariosPorDia[dia] = { inicio, fin, hs, inicio2, fin2, hs2 };
     hsTotalSemana += hs;
   }
 
@@ -1610,7 +1785,7 @@ async function guardarServicio(id = '') {
   const horasContratadas = diasSelServ.length > 0 ? hsTotalSemana / diasSelServ.length : 0;
 
   const data = {
-    cliente, direccion, codigo, idSupervisor, supervisor,
+    cliente, direccion, codigo, idSupervisor, supervisor, adminCliente,
     horaInicio, horaFin, horasContratadas,
     horasPorSemana: hsTotalSemana,
     radioGps,
@@ -1644,6 +1819,74 @@ function filtrarOpsModal() {
     const nombre = row.querySelector('div[style*="font-weight"]')?.textContent?.toLowerCase() || '';
     row.style.display = nombre.includes(q) ? '' : 'none';
   });
+}
+
+async function verServicio(ids) {
+  if (!Array.isArray(ids)) ids = [ids];
+  const id = ids[0];
+  const s = await fsGet('horas_servicios', id);
+  if (!s) return toast('No se pudo cargar el servicio', 'error');
+  const ops = (Array.isArray(s.operarios)?s.operarios:[]).map(oid => _operariosCache.find(o=>o._id===oid)?.nombre||oid).filter(Boolean);
+  // Horarios por día
+  let horarios = {};
+  try { if(s.horariosPorDia) horarios = typeof s.horariosPorDia==='string'?JSON.parse(s.horariosPorDia):s.horariosPorDia; } catch{}
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">👁 ${s.cliente||'—'}</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">#${s.codigo||'—'} ${s.adminCliente?'· Admin: '+s.adminCliente:''}</div>
+
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Dirección</div>
+          <div style="font-size:14px;font-weight:600">📍 ${s.direccion||'—'}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div style="background:var(--surface2);border-radius:10px;padding:10px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Supervisor</div>
+            <div style="font-size:13px;font-weight:600">${s.supervisor||'—'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:10px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Hs/mes</div>
+            <div style="font-size:18px;font-weight:900;color:var(--accent)">${((Number(s.horasPorSemana)||((Number(s.horasContratadas)||0)*(s.dias?.length||0)))*4).toFixed(0)}</div>
+          </div>
+        </div>
+
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Horarios por día</div>
+        <div style="margin-bottom:12px">
+          ${(s.dias||[]).map(d=>{
+            const h = horarios[d]||{inicio:s.horaInicio,fin:s.horaFin,hs:s.horasContratadas};
+            return `<div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;margin-bottom:4px">
+              <div style="display:grid;grid-template-columns:50px 1fr 1fr 60px;gap:6px;align-items:center">
+                <div style="font-family:var(--font-display);font-weight:900;color:var(--accent)">${d}</div>
+                <div style="font-size:12px">${h.inicio||'—'}</div>
+                <div style="font-size:12px">${h.fin||'—'}</div>
+                <div style="font-size:12px;text-align:right;font-weight:700">${h.hs||0}hs</div>
+              </div>
+              ${h.inicio2||h.fin2?`<div style="display:grid;grid-template-columns:50px 1fr 1fr 60px;gap:6px;align-items:center;margin-top:4px;padding-top:4px;border-top:1px dashed rgba(26,143,203,.2)">
+                <div style="font-size:9px;font-weight:700;color:var(--yellow);text-transform:uppercase">T2</div>
+                <div style="font-size:12px">${h.inicio2||'—'}</div>
+                <div style="font-size:12px">${h.fin2||'—'}</div>
+                <div style="font-size:12px;text-align:right;font-weight:700">${h.hs2||0}hs</div>
+              </div>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">
+          Operarios asignados (${ops.length})
+        </div>
+        ${ops.length===0?'<div style="font-size:13px;color:var(--text3);font-style:italic;margin-bottom:14px">Sin asignar</div>':
+          ops.map(n=>`<div style="font-size:13px;color:var(--accent);padding:5px 0;border-bottom:1px solid var(--border)">👷 ${n}</div>`).join('')}
+
+        <div class="modal-actions" style="margin-top:14px">
+          <button class="btn-secondary" onclick="cerrarModal()">CERRAR</button>
+          <button class="btn-primary" onclick="cerrarModal();modalServicio('${id}')">✏️ EDITAR</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 async function eliminarServicioGrupo(ids, nombre) {
@@ -1866,20 +2109,25 @@ async function renderCoberturas() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Coberturas</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
 
-  const [coberturas, operarios, servicios] = await Promise.all([
-    fsList('horas_coberturas'),
-    fsList('horas_usuarios'),
-    fsList('horas_servicios')
+  const [coberturas, operarios] = await Promise.all([
+    fsList('horas_coberturas'), fsList('horas_usuarios')
   ]);
   _coberturasCache = coberturas;
 
-  // Stats
   const activas = coberturas.filter(c => c.estado === 'ACTIVA').length;
   const vencidas = coberturas.filter(c => c.estado === 'ACTIVA' && c.fechaFin && c.fechaFin < isoHoy()).length;
 
+  // Agrupar por operario ausente
+  const porAusente = {};
+  for (const cob of coberturas) {
+    const k = cob.ausenteId || cob.operarioId || 'sin-ausente';
+    if (!porAusente[k]) porAusente[k] = { nombre: cob.ausenteNombre || cob.operarioNombre || '—', coberturas: [] };
+    porAusente[k].coberturas.push(cob);
+  }
+
   c.innerHTML = `
     <div class="section-title">Coberturas</div>
-    <div class="section-sub">Asignaciones variables y reemplazos</div>
+    <div class="section-sub">Reemplazos y ausencias del personal</div>
 
     <div class="admin-grid" style="margin-bottom:14px">
       <div class="stat-card"><div class="stat-num">${activas}</div><div class="stat-label">Activas</div></div>
@@ -1887,12 +2135,13 @@ async function renderCoberturas() {
     </div>
 
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn-primary" style="flex:1;min-width:160px" onclick="modalCobertura()">+ NUEVA COBERTURA</button>
-      <button class="btn-secondary" style="flex:1;min-width:160px" onclick="exportarFacturables()">💰 REPORTE FACTURABLES</button>
+      <button class="btn-primary" style="flex:1;min-width:160px" onclick="modalAusencia()">+ REGISTRAR AUSENCIA</button>
+      <button class="btn-secondary" style="flex:1;min-width:160px" onclick="exportarNovedadesLiquidacion()">📋 NOVEDADES LIQUIDACIÓN</button>
+      <button class="btn-secondary" style="flex:1;min-width:160px" onclick="exportarFacturables()">💰 FACTURABLES</button>
     </div>
 
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-      <input id="cob-buscar" placeholder="🔍 Buscar operario o cliente..." oninput="filtrarCoberturas()"
+      <input id="cob-buscar" placeholder="🔍 Buscar operario..." oninput="filtrarCoberturas()"
         style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
       <select id="cob-filtro-estado" onchange="filtrarCoberturas()"
         style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
@@ -1901,252 +2150,337 @@ async function renderCoberturas() {
         <option value="PAUSADA">Pausada</option>
         <option value="CERRADA">Cerrada</option>
       </select>
+      <select id="cob-filtro-motivo" onchange="filtrarCoberturas()"
+        style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+        <option value="">Todos los motivos</option>
+        ${MOTIVOS_COBERTURA.map(m=>`<option value="${m}">${m}</option>`).join('')}
+      </select>
     </div>
-
     <div id="cob-lista"></div>`;
 
   filtrarCoberturas();
 }
 
 function filtrarCoberturas() {
-  const q = (document.getElementById('cob-buscar')?.value || '').toLowerCase();
+  const q = (document.getElementById('cob-buscar')?.value || '').toLowerCase().replace(/,/g,' ');
   const filtroEst = document.getElementById('cob-filtro-estado')?.value || '';
+  const filtroMot = document.getElementById('cob-filtro-motivo')?.value || '';
 
   let lista = _coberturasCache;
   if (q) lista = lista.filter(c =>
-    (c.operarioNombre||'').toLowerCase().includes(q) ||
+    (c.ausenteNombre||c.operarioNombre||'').toLowerCase().replace(/,/g,' ').includes(q) ||
+    (c.reemplazanteNombre||c.operarioNombre||'').toLowerCase().replace(/,/g,' ').includes(q) ||
     (c.clienteNombre||'').toLowerCase().includes(q)
   );
   if (filtroEst) lista = lista.filter(c => c.estado === filtroEst);
+  if (filtroMot) lista = lista.filter(c => c.motivo === filtroMot);
 
-  // Ordenar: activas primero, luego por fecha inicio desc
   lista = lista.sort((a,b) => {
-    if (a.estado === 'ACTIVA' && b.estado !== 'ACTIVA') return -1;
-    if (b.estado === 'ACTIVA' && a.estado !== 'ACTIVA') return 1;
+    if (a.estado==='ACTIVA' && b.estado!=='ACTIVA') return -1;
+    if (b.estado==='ACTIVA' && a.estado!=='ACTIVA') return 1;
     return (b.fechaInicio||'').localeCompare(a.fechaInicio||'');
   });
 
   const cont = document.getElementById('cob-lista');
   if (!cont) return;
+  if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="color:var(--text3);text-align:center;padding:20px">Sin coberturas registradas</div></div>`; return; }
 
-  if (lista.length === 0) {
-    cont.innerHTML = `<div class="card-section"><div style="color:var(--text3);text-align:center;padding:20px">Sin coberturas registradas</div></div>`;
-    return;
+  // Agrupar por ausente
+  const grupos = {};
+  for (const cob of lista) {
+    const k = cob.ausenteId || cob.operarioId || 'sin';
+    if (!grupos[k]) grupos[k] = { nombre: cob.ausenteNombre||cob.operarioNombre||'—', motivo: cob.motivo, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin, coberturas: [] };
+    grupos[k].coberturas.push(cob);
   }
 
-  cont.innerHTML = lista.map(cob => {
-    const hoy = isoHoy();
-    const vencida = cob.estado === 'ACTIVA' && cob.fechaFin && cob.fechaFin < hoy;
-    const estadoColor = cob.estado === 'ACTIVA' ? (vencida ? 'pill-yellow' : 'pill-green') : cob.estado === 'PAUSADA' ? 'pill-yellow' : 'pill-gray';
-    const estadoLabel = vencida ? '⚠ VENCIDA' : cob.estado;
-    const diasStr = (cob.dias||[]).join(' · ');
-
-    return `<div class="card-section" style="margin-bottom:10px;padding:14px 16px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-            <span class="pill ${estadoColor}">${estadoLabel}</span>
-            <span class="pill pill-blue" style="font-size:10px">${cob.motivo||'—'}</span>
+  cont.innerHTML = Object.values(grupos).map(g => {
+    const estadoGeneral = g.coberturas.some(c=>c.estado==='ACTIVA') ? 'ACTIVA' : g.coberturas[0]?.estado;
+    const vencida = estadoGeneral==='ACTIVA' && g.fechaFin && g.fechaFin < isoHoy();
+    const pillColor = estadoGeneral==='ACTIVA'?(vencida?'pill-yellow':'pill-green'):'pill-gray';
+    return `<div class="card-section" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+            <span class="pill ${pillColor}">${vencida?'⚠ VENCIDA':estadoGeneral}</span>
+            <span class="pill pill-blue" style="font-size:10px">${g.motivo||'—'}</span>
           </div>
-          <div style="font-family:var(--font-display);font-size:18px;font-weight:700">${cob.operarioNombre||'—'}</div>
-          <div style="font-size:13px;color:var(--text2);margin-top:2px">🏢 ${cob.clienteNombre||'—'}</div>
-          <div style="font-size:12px;color:var(--text3);margin-top:4px">
-            📅 Desde: ${cob.fechaInicio||'—'} → ${cob.fechaFin ? 'Hasta: '+cob.fechaFin : '<em>Sin fecha de cierre</em>'}
-          </div>
+          <div style="font-family:var(--font-display);font-size:20px;font-weight:700">👤 ${g.nombre}</div>
           <div style="font-size:12px;color:var(--text3);margin-top:2px">
-            ${diasStr} · ${cob.horaInicio||'--:--'} – ${cob.horaFin||'--:--'} · ${cob.horasContratadas||0}hs
-            ${cob.horasExtraAutorizadas > 0 ? `· <span style="color:var(--yellow)">+${cob.horasExtraAutorizadas}hs extra autorizadas</span>` : ''}
+            📅 ${g.fechaInicio||'—'} → ${g.fechaFin?g.fechaFin:'<em>Sin fecha de cierre</em>'}
           </div>
-          ${cob.observaciones ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;font-style:italic">"${cob.observaciones}"</div>` : ''}
-          ${cob.motivo === 'Facturable' && currentUser.rol === 'ADMIN' && cob.precio ? `<div style="font-size:13px;font-weight:700;color:var(--yellow);margin-top:6px">💲 $${Number(cob.precio).toLocaleString('es-AR')}</div>` : ''}
-          ${cob.motivo === 'Facturable' && cob.direccionManual ? `<div style="font-size:12px;color:var(--text2);margin-top:2px">📍 ${cob.direccionManual}</div>` : ''}
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-          <button class="btn-icon edit" title="Editar" onclick="modalCobertura('${cob._id}')">✏️</button>
-          ${cob.estado === 'ACTIVA'
-            ? `<button class="btn-icon" title="Pausar" onclick="cambiarEstadoCobertura('${cob._id}','PAUSADA')" style="font-size:13px">⏸</button>
-               <button class="btn-icon" title="Cerrar" onclick="cambiarEstadoCobertura('${cob._id}','CERRADA')" style="font-size:13px">✓</button>`
-            : cob.estado === 'PAUSADA'
-            ? `<button class="btn-icon edit" title="Reactivar" onclick="cambiarEstadoCobertura('${cob._id}','ACTIVA')" style="font-size:13px">▶</button>`
-            : ''
-          }
-          <button class="btn-icon" title="Eliminar" onclick="eliminarCobertura('${cob._id}')">🗑</button>
-        </div>
+        <button class="btn-secondary" style="padding:6px 12px;font-size:12px" onclick="modalAusencia('${g.coberturas[0]?._id}')">✏️</button>
       </div>
+
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">
+        Servicios cubiertos (${g.coberturas.length})
+      </div>
+      ${g.coberturas.map(cob => `
+        <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:700;color:var(--text)">🏢 ${cob.clienteNombre||'—'} ${cob.clienteNombreManual?'(manual)':''}</div>
+            <div style="font-size:12px;color:var(--accent);margin-top:2px">
+              👷 Reemplaza: <strong>${cob.reemplazanteNombre||cob.operarioNombre||'—'}</strong>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">
+              ${(cob.dias||[]).join(' · ')} · ${cob.horaInicio||'--:--'}–${cob.horaFin||'--:--'} · ${cob.horasContratadas||0}hs/día
+            </div>
+            ${cob.observaciones?`<div style="font-size:11px;color:var(--text2);font-style:italic;margin-top:2px">"${cob.observaciones}"</div>`:''}
+            ${cob.motivo==='Facturable'&&currentUser.rol==='ADMIN'&&cob.precio?`<div style="font-size:12px;font-weight:700;color:var(--yellow);margin-top:3px">💲 $${Number(cob.precio).toLocaleString('es-AR')}</div>`:''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;margin-left:8px">
+            ${cob.estado==='ACTIVA'
+              ?`<button class="btn-icon" title="Cerrar" onclick="cambiarEstadoCobertura('${cob._id}','CERRADA')" style="font-size:11px">✓</button>`
+              :`<button class="btn-icon" title="Reactivar" onclick="cambiarEstadoCobertura('${cob._id}','ACTIVA')" style="font-size:11px">▶</button>`}
+            <button class="btn-icon" title="Eliminar" onclick="eliminarCobertura('${cob._id}')">🗑</button>
+          </div>
+        </div>`).join('')}
     </div>`;
   }).join('');
 }
 
-// ── MODAL ALTA / EDICIÓN ──
-async function modalCobertura(id = null) {
+// ── MODAL NUEVA AUSENCIA (flujo ausente → servicios → reemplazantes) ──
+async function modalAusencia(id = null) {
   const [operarios, servicios] = await Promise.all([
     fsList('horas_usuarios'), fsList('horas_servicios')
   ]);
-
-  let cob = {};
-  if (id) cob = await fsGet('horas_coberturas', id) || {};
-  const esEdicion = !!id;
-  const opsVariable = operarios.filter(o => o.rol === 'OPERARIO').sort((a,b) => a.nombre.localeCompare(b.nombre));
-  const srvOpts = servicios.sort((a,b) => (a.cliente||'').localeCompare(b.cliente||'')).map(s =>
-    `<option value="${s._id}" data-dias='${JSON.stringify(s.dias||[])}' data-inicio="${s.horaInicio||''}" data-fin="${s.horaFin||''}" data-hs="${s.horasContratadas||0}" ${cob.servicioId===s._id?'selected':''}>${s.cliente}${s.codigo?' #'+s.codigo:''}</option>`).join('');
-  const diasCob = Array.isArray(cob.dias) ? cob.dias : [];
-  const esFacturable = cob.motivo === 'Facturable';
-  const esAdmin = currentUser.rol === 'ADMIN';
+  const opsList = operarios.filter(o=>o.rol==='OPERARIO').sort((a,b)=>a.nombre.localeCompare(b.nombre));
 
   const m = document.getElementById('modal-container');
   m.innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
       <div class="modal">
-        <div class="modal-title">${esEdicion ? 'Editar Cobertura' : 'Nueva Cobertura'}</div>
+        <div class="modal-title">Registrar Ausencia</div>
 
         <div class="field-sm">
-          <label>Motivo</label>
-          <select id="cob-motivo" onchange="toggleFacturable()" style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
-            ${MOTIVOS_COBERTURA.map(mv => `<option value="${mv}" ${cob.motivo===mv?'selected':''}>${mv}</option>`).join('')}
-          </select>
-        </div>
-
-        <div class="field-sm">
-          <label>Operario</label>
-          <input id="cob-op-buscar" placeholder="🔍 Buscar operario..." oninput="filtrarOpsCob()"
+          <label>Operario ausente</label>
+          <input id="aus-buscar" placeholder="🔍 Buscar..." oninput="this.nextElementSibling.querySelectorAll('option').forEach(o=>o.style.display=o.text.toLowerCase().replace(/,/g,' ').includes(this.value.toLowerCase().replace(/,/g,' '))?'':'none')"
             style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none;margin-bottom:4px">
-          <select id="cob-op" size="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:8px;font-size:13px">
-            ${opsVariable.map(o => `<option value="${o._id}" data-nombre="${o.nombre}" ${cob.operarioId===o._id?'selected':''}>${o.nombre}${o.dni?' · DNI '+o.dni:''}</option>`).join('')}
+          <select id="aus-op" size="5" onchange="cargarServiciosAusente()" style="width:100%;background:var(--bg);border:1.5px solid var(--accent);color:var(--text);padding:6px;border-radius:8px;font-size:13px">
+            <option value="">— Seleccioná un operario —</option>
+            ${opsList.map(o=>`<option value="${o._id}" data-nombre="${o.nombre.replace(/"/g,'&quot;')}">${o.nombre}</option>`).join('')}
           </select>
-        </div>
-
-        <!-- SELECTOR DE OBJETIVO: existente o manual según motivo -->
-        <div id="bloque-srv-existente" class="field-sm" style="display:${esFacturable?'none':'block'}">
-          <label>Servicio / Objetivo</label>
-          <input id="cob-srv-buscar" placeholder="🔍 Buscar servicio..." oninput="filtrarSrvCob()"
-            style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none;margin-bottom:4px">
-          <select id="cob-srv" size="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:8px;font-size:13px" onchange="cargarDatosServicio()">
-            ${srvOpts}
-          </select>
-        </div>
-
-        <!-- OBJETIVO FACTURABLE: elegir existente O crear manual -->
-        <div id="bloque-facturable" style="display:${esFacturable?'block':'none'}">
-          <div style="background:rgba(224,123,42,.08);border:1px solid rgba(224,123,42,.25);border-radius:10px;padding:12px 14px;margin-bottom:10px">
-            <div style="font-size:12px;font-weight:700;color:var(--yellow);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">💰 Trabajo Facturable</div>
-
-            <div class="field-sm" style="margin-bottom:8px">
-              <label style="font-size:10px">Tipo de objetivo</label>
-              <div style="display:flex;gap:8px;margin-top:4px">
-                <button id="btn-srv-existente" onclick="toggleTipoObjetivo('existente')"
-                  style="flex:1;padding:8px;border-radius:8px;font-family:var(--font-display);font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid var(--accent);background:var(--accent);color:#fff;transition:all .2s">
-                  📋 Objetivo existente
-                </button>
-                <button id="btn-srv-manual" onclick="toggleTipoObjetivo('manual')"
-                  style="flex:1;padding:8px;border-radius:8px;font-family:var(--font-display);font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid var(--border);background:var(--surface2);color:var(--text2);transition:all .2s">
-                  ✏️ Objetivo manual
-                </button>
-              </div>
-            </div>
-
-            <!-- Objetivo existente dentro de facturable -->
-            <div id="fact-srv-existente">
-              <input id="cob-srv-buscar2" placeholder="🔍 Buscar servicio..." oninput="document.querySelectorAll('#cob-srv2 option').forEach(o=>o.style.display=o.text.toLowerCase().includes(this.value.toLowerCase())?'':' none')"
-                style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none;margin-bottom:4px">
-              <select id="cob-srv2" size="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:8px;font-size:13px" onchange="cargarDatosServicio2()">
-                ${srvOpts}
-              </select>
-            </div>
-
-            <!-- Objetivo manual dentro de facturable -->
-            <div id="fact-srv-manual" style="display:none">
-              <div class="field-sm"><label>Nombre del cliente / trabajo</label>
-                <input id="fact-cliente" placeholder="Ej: Final de obra Casa García" value="${cob.clienteNombreManual||''}">
-              </div>
-              <div class="field-sm"><label>Dirección</label>
-                <input id="fact-dir" placeholder="Ej: Bv. Los Tilos 2345, Córdoba" value="${cob.direccionManual||''}">
-              </div>
-            </div>
-
-            ${esAdmin ? `
-            <div class="field-sm" style="margin-top:10px">
-              <label style="color:var(--yellow)">💲 Precio a facturar (solo visible para Admin)</label>
-              <input id="cob-precio" type="number" step="0.01" placeholder="Ej: 25000" value="${cob.precio||''}"
-                style="width:100%;background:#fff;border:1.5px solid rgba(224,123,42,.4);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
-            </div>` : ''}
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="field-sm"><label>Fecha inicio</label><input id="cob-finicio" type="date" value="${cob.fechaInicio||isoHoy()}"></div>
-          <div class="field-sm"><label>Fecha fin <span style="color:var(--text3);font-size:10px">(vacío = indefinida)</span></label><input id="cob-ffin" type="date" value="${cob.fechaFin||''}"></div>
         </div>
 
         <div class="field-sm">
-          <label>Días de trabajo</label>
-          <div class="dias-check" id="dias-check-cob">
-            ${DIAS_SEMANA.map(d => `<button class="dia-btn ${diasCob.includes(d)?'sel':''}" id="cob-dia-${d}" onclick="toggleDiaCob('${d}')">${d}</button>`).join('')}
-          </div>
+          <label>Motivo de ausencia</label>
+          <select id="aus-motivo" style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+            ${MOTIVOS_COBERTURA.filter(m=>m!=='Facturable').map(m=>`<option value="${m}">${m}</option>`).join('')}
+          </select>
         </div>
 
         <div class="form-row">
-          <div class="field-sm"><label>Hora inicio</label><input id="cob-hinicio" type="time" value="${cob.horaInicio||''}"></div>
-          <div class="field-sm"><label>Hora fin</label><input id="cob-hfin" type="time" value="${cob.horaFin||''}"></div>
+          <div class="field-sm"><label>Fecha inicio</label><input id="aus-finicio" type="date" value="${isoHoy()}"></div>
+          <div class="field-sm"><label>Fecha fin <span style="color:var(--text3);font-size:10px">(vacío = abierto)</span></label><input id="aus-ffin" type="date"></div>
         </div>
-        <div class="form-row">
-          <div class="field-sm"><label>Horas contratadas / jornada</label><input id="cob-hs" type="number" step="0.5" value="${cob.horasContratadas||''}"></div>
-          <div class="field-sm"><label>Hs. extra autorizadas</label><input id="cob-hsextra" type="number" step="0.5" placeholder="0" value="${cob.horasExtraAutorizadas||0}"></div>
-        </div>
+
         <div class="field-sm">
           <label>Observaciones</label>
-          <input id="cob-obs" placeholder="Ej: Cubre a Pérez por vacaciones" value="${cob.observaciones||''}">
+          <input id="aus-obs" placeholder="Ej: Certificado médico presentado">
+        </div>
+
+        <!-- Servicios del ausente con sus reemplazantes -->
+        <div id="aus-servicios-bloque" style="display:none">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin:12px 0 8px">
+            Asignar reemplazantes por servicio
+          </div>
+          <div id="aus-servicios-lista"></div>
         </div>
 
         <div class="modal-actions">
           <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
-          <button class="btn-primary" onclick="guardarCobertura('${id||''}')">
-            ${esEdicion ? '💾 GUARDAR CAMBIOS' : '✓ CREAR COBERTURA'}
-          </button>
+          <button class="btn-primary" onclick="guardarAusencia()">✓ GUARDAR AUSENCIA</button>
         </div>
       </div>
     </div>`;
 
-  _diasSelCob = [...diasCob];
-  // Si ya era facturable con manual, mostrar el estado correcto
-  if (esFacturable && cob.clienteNombreManual) toggleTipoObjetivo('manual');
+  // Guardar operarios y servicios para uso en cargarServiciosAusente
+  window._aus_operarios = opsList;
+  window._aus_servicios = servicios;
 }
 
-let _diasSelCob = [];
-let _tipoObjetivoFact = 'existente';
+async function cargarServiciosAusente() {
+  const sel = document.getElementById('aus-op');
+  const ausenteId = sel?.value;
+  if (!ausenteId) return;
 
-function toggleFacturable() {
-  const motivo = document.getElementById('cob-motivo')?.value;
-  const esF = motivo === 'Facturable';
-  document.getElementById('bloque-srv-existente').style.display = esF ? 'none' : 'block';
-  document.getElementById('bloque-facturable').style.display = esF ? 'block' : 'none';
+  const servicios = window._aus_servicios || [];
+  const operarios = window._aus_operarios || [];
+
+  // Servicios donde el ausente está asignado
+  const misServicios = servicios.filter(s =>
+    (Array.isArray(s.operarios)?s.operarios:[]).includes(ausenteId)
+  );
+
+  const bloque = document.getElementById('aus-servicios-bloque');
+  const lista = document.getElementById('aus-servicios-lista');
+  if (!bloque || !lista) return;
+
+  if (misServicios.length === 0) {
+    bloque.style.display = 'block';
+    lista.innerHTML = `<div style="font-size:13px;color:var(--text3);font-style:italic;padding:8px 0">Este operario no tiene servicios fijos asignados — solo se registrará la novedad.</div>`;
+    return;
+  }
+
+  bloque.style.display = 'block';
+  const opsOpts = operarios.map(o=>`<option value="${o._id}" data-nombre="${o.nombre.replace(/"/g,'&quot;')}">${o.nombre}</option>`).join('');
+
+  lista.innerHTML = misServicios.map(s => {
+    // Obtener horario específico si existe
+    let horarios = {};
+    try { if(s.horariosPorDia) horarios = typeof s.horariosPorDia==='string'?JSON.parse(s.horariosPorDia):s.horariosPorDia; } catch{}
+    const hsDia = s.horasContratadas || 0;
+    const diasStr = (s.dias||[]).join(' · ');
+    return `<div style="background:var(--accent-light);border:1px solid rgba(26,143,203,.2);border-radius:10px;padding:12px;margin-bottom:8px" id="srv-bloque-${s._id}">
+      <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:2px">🏢 ${s.cliente||'—'} <span style="font-size:11px;color:var(--text3)">#${s.codigo||''}</span></div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:6px">${diasStr} · ${s.horaInicio||''}–${s.horaFin||''} · ${hsDia}hs/día</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="chk-srv-${s._id}" checked onchange="toggleReemplazante('${s._id}')"
+          style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0">
+        <label for="chk-srv-${s._id}" style="font-size:12px;color:var(--text3)">Incluir en la cobertura</label>
+      </div>
+      <div id="rep-bloque-${s._id}" style="margin-top:8px">
+        <label style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Reemplazante</label>
+        <select id="rep-${s._id}" style="width:100%;background:#fff;border:1.5px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;outline:none;margin-top:4px">
+          <option value="">— Sin reemplazante (solo novedad) —</option>
+          ${opsOpts}
+        </select>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-function toggleTipoObjetivo(tipo) {
-  _tipoObjetivoFact = tipo;
-  const esE = tipo === 'existente';
-  document.getElementById('fact-srv-existente').style.display = esE ? 'block' : 'none';
-  document.getElementById('fact-srv-manual').style.display = esE ? 'none' : 'block';
-  document.getElementById('btn-srv-existente').style.background = esE ? 'var(--accent)' : 'var(--surface2)';
-  document.getElementById('btn-srv-existente').style.color = esE ? '#fff' : 'var(--text2)';
-  document.getElementById('btn-srv-existente').style.borderColor = esE ? 'var(--accent)' : 'var(--border)';
-  document.getElementById('btn-srv-manual').style.background = !esE ? 'var(--yellow)' : 'var(--surface2)';
-  document.getElementById('btn-srv-manual').style.color = !esE ? '#fff' : 'var(--text2)';
-  document.getElementById('btn-srv-manual').style.borderColor = !esE ? 'var(--yellow)' : 'var(--border)';
+function toggleReemplazante(srvId) {
+  const chk = document.getElementById(`chk-srv-${srvId}`);
+  const bloque = document.getElementById(`rep-bloque-${srvId}`);
+  if (bloque) bloque.style.display = chk?.checked ? 'block' : 'none';
 }
 
-function cargarDatosServicio2() {
-  const sel = document.getElementById('cob-srv2');
-  const opt = sel?.options[sel.selectedIndex];
-  if (!opt) return;
-  try {
-    const dias = JSON.parse(opt.dataset.dias || '[]');
-    _diasSelCob = [...dias];
-    DIAS_SEMANA.forEach(d => { const btn = document.getElementById('cob-dia-'+d); if (btn) btn.classList.toggle('sel', dias.includes(d)); });
-  } catch {}
-  if (opt.dataset.inicio) document.getElementById('cob-hinicio').value = opt.dataset.inicio;
-  if (opt.dataset.fin) document.getElementById('cob-hfin').value = opt.dataset.fin;
-  if (opt.dataset.hs) document.getElementById('cob-hs').value = opt.dataset.hs;
+async function guardarAusencia() {
+  const ausenteSel = document.getElementById('aus-op');
+  const ausenteId = ausenteSel?.value;
+  const ausenteNombre = ausenteSel?.options[ausenteSel.selectedIndex]?.dataset.nombre || '';
+  const motivo = document.getElementById('aus-motivo')?.value;
+  const fechaInicio = document.getElementById('aus-finicio')?.value;
+  const fechaFin = document.getElementById('aus-ffin')?.value || '';
+  const observaciones = document.getElementById('aus-obs')?.value.trim() || '';
+
+  if (!ausenteId) return toast('Seleccioná el operario ausente', 'warn');
+  if (!fechaInicio) return toast('La fecha de inicio es obligatoria', 'warn');
+
+  const servicios = window._aus_servicios || [];
+  const misServicios = servicios.filter(s =>
+    (Array.isArray(s.operarios)?s.operarios:[]).includes(ausenteId)
+  );
+
+  let guardados = 0;
+
+  if (misServicios.length === 0) {
+    // Solo novedad sin servicios
+    await fsAdd('horas_coberturas', {
+      ausenteId, ausenteNombre, motivo, fechaInicio, fechaFin, observaciones,
+      operarioId: ausenteId, operarioNombre: ausenteNombre,
+      clienteNombre: '— Sin servicio asignado —',
+      estado: 'ACTIVA', dias: [], horasContratadas: 0,
+      soloNovedad: true, creadaPor: currentUser.nombre, fechaCreacion: isoHoy()
+    });
+    guardados++;
+  } else {
+    // Una cobertura por servicio incluido
+    for (const s of misServicios) {
+      const chk = document.getElementById(`chk-srv-${s._id}`);
+      if (!chk?.checked) continue;
+
+      const repSel = document.getElementById(`rep-${s._id}`);
+      const reemplazanteId = repSel?.value || '';
+      const reemplazanteNombre = reemplazanteId ? (repSel?.options[repSel.selectedIndex]?.dataset.nombre || repSel?.options[repSel.selectedIndex]?.text?.split(' · ')[0] || '') : '';
+
+      await fsAdd('horas_coberturas', {
+        ausenteId, ausenteNombre, motivo, fechaInicio, fechaFin, observaciones,
+        operarioId: reemplazanteId || ausenteId,
+        operarioNombre: reemplazanteNombre || ausenteNombre,
+        reemplazanteId, reemplazanteNombre,
+        servicioId: s._id, clienteNombre: s.cliente||'',
+        horaInicio: s.horaInicio||'', horaFin: s.horaFin||'',
+        horasContratadas: s.horasContratadas||0, dias: s.dias||[],
+        estado: 'ACTIVA', creadaPor: currentUser.nombre, fechaCreacion: isoHoy()
+      });
+      guardados++;
+    }
+  }
+
+  invalidarCache('horas_coberturas');
+  cerrarModal();
+  toast(`✓ Ausencia registrada — ${guardados} cobertura${guardados!==1?'s':''} creadas`, 'ok');
+  renderCoberturas();
 }
+
+// ── REPORTE NOVEDADES LIQUIDACIÓN ──
+async function exportarNovedadesLiquidacion() {
+  const coberturas = await fsList('horas_coberturas');
+  const mes = isoHoy().slice(0,7);
+  const [y,m] = mes.split('-');
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  // Filtrar ausencias del mes (por fecha inicio)
+  const delMes = coberturas.filter(c => c.ausenteNombre && c.fechaInicio?.startsWith(mes));
+
+  if (!delMes.length) {
+    // Si no hay del mes actual, tomar todos
+    const todos = coberturas.filter(c => c.ausenteNombre);
+    if (!todos.length) return toast('Sin novedades para exportar', 'warn');
+  }
+
+  const lista = delMes.length ? delMes : coberturas.filter(c => c.ausenteNombre);
+
+  // Agrupar por ausente para calcular días totales
+  const porAusente = {};
+  for (const cob of lista) {
+    const k = cob.ausenteId || cob.ausenteNombre;
+    if (!porAusente[k]) porAusente[k] = {
+      nombre: cob.ausenteNombre, motivo: cob.motivo,
+      fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin,
+      observaciones: cob.observaciones, servicios: []
+    };
+    if (cob.clienteNombre && !cob.soloNovedad) {
+      porAusente[k].servicios.push(`${cob.clienteNombre} → ${cob.reemplazanteNombre||'Sin reemplazante'}`);
+    }
+  }
+
+  let csv = `NOVEDADES PARA LIQUIDACIÓN;${meses[parseInt(m)-1]} ${y}\n\n`;
+  csv += `Operario;Motivo;Fecha Inicio;Fecha Fin;Días Ausencia;Servicios Cubiertos;Observaciones\n`;
+
+  for (const nov of Object.values(porAusente)) {
+    // Calcular días de ausencia
+    let diasAusencia = '';
+    if (nov.fechaInicio) {
+      const fi = new Date(nov.fechaInicio);
+      const ff = nov.fechaFin ? new Date(nov.fechaFin) : new Date();
+      const diff = Math.round((ff - fi) / (1000*60*60*24)) + 1;
+      diasAusencia = diff;
+    }
+    csv += [
+      nov.nombre, nov.motivo, nov.fechaInicio||'',
+      nov.fechaFin||'abierto', diasAusencia,
+      nov.servicios.join(' / ') || '—',
+      nov.observaciones||''
+    ].join(';') + '\n';
+  }
+
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `Novedades_Liquidacion_${mes}.csv`;
+  link.click();
+  toast('✓ Novedades de liquidación exportadas', 'ok');
+}
+
+// ── MODAL EDICIÓN COBERTURA (mantener para compatibilidad) ──
+async function modalCobertura(id = null) {
+  await modalAusencia(id);
+}
+
+
 
 function filtrarOpsCob() {
   const q = (document.getElementById('cob-op-buscar')?.value || '').toLowerCase();
@@ -3245,8 +3579,8 @@ function cerrarModal() {
 //  INIT
 // ════════════════════════════════════════════
 window.addEventListener('load', () => {
-  // Registrar Service Worker para PWA
-  if ('serviceWorker' in navigator) {
+  // Registrar Service Worker solo en GitHub Pages
+  if ('serviceWorker' in navigator && location.hostname === 'megaclean-art.github.io') {
     navigator.serviceWorker.register('/horas/sw.js')
       .then(() => console.log('SW registrado'))
       .catch(e => console.warn('SW error:', e));
