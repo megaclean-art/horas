@@ -2195,12 +2195,23 @@ async function guardarNuevoAcceso(rol) {
 
 // ════════════════════════════════════════════
 function esMiServicio(s) {
-  // Un servicio es "mío" si mi nombre aparece en supervisor o idSupervisor
-  const supNombre = (currentUser.nombre||'').toUpperCase();
+  const supNombre = (currentUser.nombre||'').toUpperCase().trim();
+  const supSupervisor = (currentUser.supervisor||'').toUpperCase().trim();
   const supId = currentUser._id || '';
-  return (s.supervisor||'').toUpperCase().includes(supNombre) ||
-         s.idSupervisor === supId ||
-         (s.supervisor||'').toUpperCase() === supNombre;
+  const supDni = currentUser.dni || '';
+  const srvSupervisor = (s.supervisor||'').toUpperCase().trim();
+  const srvIdSup = (s.idSupervisor||'').toString().trim();
+
+  // Si el supervisor no tiene campo supervisor configurado → ver todo
+  if (!supSupervisor) return true;
+
+  return (
+    srvSupervisor.includes(supSupervisor) ||
+    supSupervisor.includes(srvSupervisor) && srvSupervisor.length > 3 ||
+    srvSupervisor.includes(supNombre) ||
+    srvIdSup === supId ||
+    srvIdSup === supDni
+  );
 }
 
 function esMiOperario(o, misServicios) {
@@ -2414,6 +2425,15 @@ async function renderSupServicios() {
   c.innerHTML = `
     <div class="section-title">🏢 Mis Servicios</div>
     <div class="section-sub">${misServicios.length} objetivos bajo tu supervisión</div>
+    ${misServicios.length === 0 ? `
+    <div style="background:rgba(224,123,42,.08);border:1.5px solid rgba(224,123,42,.3);border-radius:12px;padding:16px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--yellow);margin-bottom:6px">⚠ Sin servicios asignados</div>
+      <div style="font-size:13px;color:var(--text2)">
+        Para ver tus servicios, el campo <strong>"Supervisor"</strong> en cada servicio debe coincidir con tu nombre de supervisión.<br><br>
+        Tu nombre de supervisión actual: <strong>${currentUser.supervisor || currentUser.nombre || '—'}</strong><br><br>
+        Pedile al administrador que actualice tu perfil con el nombre de supervisión correcto, o que verifique los servicios asignados.
+      </div>
+    </div>` : ''}
     <input id="sup-srv-q" placeholder="🔍 Buscar servicio..." oninput="filtrarSupSrvs()"
       style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
     <div id="sup-srv-lista"></div>`;
