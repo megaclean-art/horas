@@ -3034,13 +3034,28 @@ async function renderReporteBancoHoras() {
 
   for (const cob of cobMes) {
     const opId = cob.reemplazanteId;
-    // Calcular días trabajados en el período
+    // Calcular horas exactas por día del período
     const fi = new Date(cob.fechaInicio + 'T12:00:00');
     const ff = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date();
-    const diasPeriodo = Math.max(1, Math.round((ff - fi) / (1000*60*60*24)) + 1);
-    const diasSemana = (cob.dias||[]).length || 5;
-    const semanas = diasPeriodo / 7;
-    const hsEstimadas = (Number(cob.horasContratadas)||0) * diasSemana * semanas;
+    const diasCob2 = cob.dias || [];
+    let hsEstimadas = 0;
+    const srv2 = servicios.find(s => s._id === cob.servicioId);
+    let horariosSrv = {};
+    if (srv2?.horariosPorDia) {
+      try { horariosSrv = typeof srv2.horariosPorDia==='string'?JSON.parse(srv2.horariosPorDia):srv2.horariosPorDia; } catch{}
+    }
+    const cur2 = new Date(fi);
+    const DIAS_MAP2 = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
+    while (cur2 <= ff) {
+      const diaStr2 = DIAS_MAP2[cur2.getDay()];
+      if (diasCob2.includes(diaStr2)) {
+        let hsDia = Number(cob.horasContratadas) || 0;
+        if (horariosSrv[diaStr2]?.hs) hsDia = Number(horariosSrv[diaStr2].hs);
+        else if (srv2?.horasPorSemana && srv2?.dias?.length) hsDia = Number(srv2.horasPorSemana) / srv2.dias.length;
+        hsEstimadas += hsDia;
+      }
+      cur2.setDate(cur2.getDate() + 1);
+    }
 
     // Verificar si ya fichó en alguna de estas coberturas
     const fichadoCob = fichadasMes.some(f =>
@@ -3224,6 +3239,39 @@ async function renderReporteOperario() {
       cob.fechaInicio?.slice(0,7) === mes
     );
 
+    // Obtener horarios por día del servicio original si existen
+    const getHsPorDia = (cob, diaStr) => {
+      // 1. Intentar desde horariosPorDia de la cobertura
+      if (cob.horariosPorDia) {
+        try {
+          const hp = typeof cob.horariosPorDia==='string'?JSON.parse(cob.horariosPorDia):cob.horariosPorDia;
+          if (hp[diaStr]?.hs && Number(hp[diaStr].hs) > 0) return Number(hp[diaStr].hs);
+        } catch{}
+      }
+      // 2. Intentar desde el servicio original
+      if (cob.servicioId) {
+        const srv = servicios.find(s => s._id === cob.servicioId);
+        if (srv?.horariosPorDia) {
+          try {
+            const hp = typeof srv.horariosPorDia==='string'?JSON.parse(srv.horariosPorDia):srv.horariosPorDia;
+            if (hp[diaStr]?.hs && Number(hp[diaStr].hs) > 0) return Number(hp[diaStr].hs);
+          } catch{}
+        }
+        // 3. Si el servicio tiene horasContratadas por jornada (no promedio)
+        // Verificar que horasContratadas no sea un promedio raro (sin decimales largos)
+        if (srv) {
+          const hsDia = Number(srv.horasContratadas) || 0;
+          // Si tiene horasPorSemana y días, calcular real por día
+          if (srv.horasPorSemana && srv.dias?.length) {
+            return Number(srv.horasPorSemana) / srv.dias.length;
+          }
+          return hsDia;
+        }
+      }
+      // 4. Fallback: horasContratadas de la cobertura
+      return Number(cob.horasContratadas) || 0;
+    };
+
     // Calcular horas de cobertura día por día (exacto, no promedio)
     const detalleCoberturas = [];
     let hsCobTotal = 0;
@@ -3244,14 +3292,7 @@ async function renderReporteOperario() {
         const DIAS_JS_MAP = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
         const diaStr = DIAS_JS_MAP[diaSemIdx];
         if (diasCob.includes(diaStr)) {
-          // Verificar horario específico del día si existe
-          let hsEste = hsPorDia;
-          if (cob.horariosPorDia) {
-            try {
-              const hp = typeof cob.horariosPorDia==='string'?JSON.parse(cob.horariosPorDia):cob.horariosPorDia;
-              if (hp[diaStr]?.hs) hsEste = Number(hp[diaStr].hs);
-            } catch{}
-          }
+          const hsEste = getHsPorDia(cob, diaStr);
           hsEstaCob += hsEste;
           diasTrabajados.push({ fecha: cur.toISOString().slice(0,10), dia: diaStr, hs: hsEste });
         }
