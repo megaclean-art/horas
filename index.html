@@ -2006,10 +2006,11 @@ function renderFilaAcceso(u) {
           · <span style="color:${tienePass?'var(--green)':'var(--red)'}">${tienePass?'✓ Con contraseña':'⚠ Sin contraseña'}</span>
         </div>
         ${tienePass ? `<div style="font-size:11px;color:var(--text3);margin-top:1px">Contraseña: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">${u.password}</code></div>` : ''}
+        ${u.supervisor ? `<div style="font-size:11px;color:var(--yellow);margin-top:1px">Supervisión: ${u.supervisor}</div>` : ''}
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0">
-        <button class="btn-icon edit" title="Cambiar contraseña" onclick="modalCambiarPass('${u._id}','${(u.nombre||'').replace(/'/g,'')}','${u.dni||''}')">🔑</button>
-        <button class="btn-icon edit" title="Editar" onclick="modalOperario('${u._id}')">✏️</button>
+        <button class="btn-icon" title="Editar acceso" onclick="modalEditarAcceso('${u._id}')">✏️</button>
+        <button class="btn-icon" title="Cambiar contraseña" onclick="modalCambiarPass('${u._id}','${(u.nombre||'').replace(/'/g,'')}','${u.dni||''}')">🔑</button>
       </div>
     </div>
   </div>`;
@@ -2044,7 +2045,117 @@ function filtrarAccesos() {
   });
 }
 
-// ── MODAL CAMBIAR CONTRASEÑA ──
+// ── MODAL EDITAR ACCESO ──
+async function modalEditarAcceso(id) {
+  const u = await fsGet('horas_usuarios', id);
+  if (!u) return toast('No se pudo cargar el usuario', 'error');
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">✏️ Editar Acceso</div>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:16px">Datos de acceso al sistema</div>
+
+        <div class="field-sm">
+          <label>Nombre completo</label>
+          <input id="ea-nombre" value="${u.nombre||''}" placeholder="Ej: García, Juan Carlos">
+        </div>
+
+        <div class="field-sm">
+          <label>DNI / Usuario <span style="color:var(--text3);font-size:10px">(se usa para ingresar)</span></label>
+          <input id="ea-dni" value="${u.dni||''}" placeholder="Ej: 28456789" autocomplete="off">
+        </div>
+
+        <div class="field-sm">
+          <label>Rol</label>
+          <select id="ea-rol" style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none" onchange="toggleSupNombreEa()">
+            <option value="OPERARIO" ${u.rol==='OPERARIO'?'selected':''}>👷 Operario</option>
+            <option value="SUPERVISOR" ${u.rol==='SUPERVISOR'?'selected':''}>🏷 Supervisor</option>
+            <option value="ADMIN" ${u.rol==='ADMIN'?'selected':''}>👑 Administrador</option>
+          </select>
+        </div>
+
+        <div class="field-sm" id="ea-sup-bloque" style="display:${u.rol==='SUPERVISOR'?'block':'none'}">
+          <label>Nombre de supervisión <span style="color:var(--text3);font-size:10px">(debe coincidir con el campo "supervisor" en los servicios)</span></label>
+          <input id="ea-supervisor" value="${u.supervisor||''}" placeholder="Ej: SUPERVISION CENTRICA">
+        </div>
+
+        <div class="field-sm">
+          <label>Legajo</label>
+          <input id="ea-legajo" value="${u.legajo||''}" placeholder="Ej: 00064">
+        </div>
+
+        <div class="field-sm">
+          <label>Nueva contraseña <span style="color:var(--text3);font-size:10px">(dejá vacío para no cambiar)</span></label>
+          <input id="ea-pass" type="text" value="" placeholder="Nueva contraseña" autocomplete="new-password"
+            style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-size:15px;outline:none;letter-spacing:2px">
+          ${u.password ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">Contraseña actual: <code style="background:var(--surface2);padding:1px 6px;border-radius:4px">${u.password}</code></div>` : ''}
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarEditarAcceso('${id}','${u.dni||''}')">💾 GUARDAR CAMBIOS</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleSupNombreEa() {
+  const rol = document.getElementById('ea-rol')?.value;
+  const bloque = document.getElementById('ea-sup-bloque');
+  if (bloque) bloque.style.display = rol==='SUPERVISOR' ? 'block' : 'none';
+}
+
+async function guardarEditarAcceso(id, dniAnterior) {
+  const nombre = document.getElementById('ea-nombre')?.value.trim();
+  const dni = document.getElementById('ea-dni')?.value.trim();
+  const rol = document.getElementById('ea-rol')?.value;
+  const supervisor = document.getElementById('ea-supervisor')?.value.trim() || '';
+  const legajo = document.getElementById('ea-legajo')?.value.trim() || '';
+  const passNueva = document.getElementById('ea-pass')?.value.trim() || '';
+
+  if (!nombre) return toast('El nombre es obligatorio', 'warn');
+  if (!dni) return toast('El DNI/usuario es obligatorio', 'warn');
+
+  showLoader(true);
+
+  const data = { nombre, dni, rol, legajo };
+  if (supervisor) data.supervisor = supervisor;
+  if (passNueva) data.password = passNueva;
+
+  // Guardar en Firestore
+  await fsSave('horas_usuarios', id, data);
+
+  // Si cambió el DNI o la contraseña, actualizar Firebase Auth
+  const API_KEY = 'AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng';
+
+  if (passNueva) {
+    // Intentar actualizar contraseña en Firebase Auth
+    const email = dni + '@megaclean.com.ar';
+    let passAuth = passNueva;
+    while (passAuth.length < 6) passAuth = passAuth + passAuth;
+    passAuth = passAuth.slice(0,6);
+    try {
+      const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({email, password: passAuth, returnSecureToken: false})
+      });
+      const d = await r.json();
+      if (d.error && d.error.message !== 'EMAIL_EXISTS') {
+        console.warn('Firebase Auth update:', d.error.message);
+      }
+    } catch(e) {}
+  }
+
+  invalidarCache('horas_usuarios');
+  showLoader(false);
+  cerrarModal();
+  toast(`✓ ${nombre} actualizado`, 'ok');
+  renderGestionAccesos();
+}
+
+
 function modalCambiarPass(id, nombre, dni) {
   const m = document.getElementById('modal-container');
   m.innerHTML = `
