@@ -1126,7 +1126,10 @@ async function renderOperarios() {
   c.innerHTML = `
     <div class="section-title">Operarios</div>
     <div class="section-sub">Gestión de usuarios del sistema</div>
-    <button class="btn-primary" style="margin-bottom:14px" onclick="modalOperario()">+ NUEVO OPERARIO</button>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn-primary" style="flex:1;min-width:160px" onclick="modalOperario()">+ NUEVO OPERARIO</button>
+      <button class="btn-secondary" style="flex:1;min-width:160px" onclick="renderGestionAccesos()">🔑 GESTIÓN DE ACCESOS</button>
+    </div>
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <input id="op-buscar" placeholder="🔍 Buscar operario o DNI..." oninput="filtrarOperarios()"
         style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
@@ -1938,7 +1941,258 @@ async function renderFichadasAdmin() {
 }
 
 // ════════════════════════════════════════════
-//  HELPERS SUPERVISOR — filtrar por supervisión
+//  GESTIÓN DE ACCESOS (ADMIN)
+// ════════════════════════════════════════════
+async function renderGestionAccesos() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Gestión de Accesos</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const usuarios = await fsList('horas_usuarios');
+  const admins = usuarios.filter(u => u.rol === 'ADMIN').sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const supervisores = usuarios.filter(u => u.rol === 'SUPERVISOR').sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const operarios = usuarios.filter(u => u.rol === 'OPERARIO').sort((a,b)=>a.nombre.localeCompare(b.nombre));
+
+  window._accesosTodos = usuarios;
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderOperarios()">← Volver</button>
+    <div class="section-title">🔑 Gestión de Accesos</div>
+    <div class="section-sub">${usuarios.length} usuarios registrados</div>
+
+    <input id="acc-buscar" placeholder="🔍 Buscar usuario..." oninput="filtrarAccesos()"
+      style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:16px">
+
+    <!-- ADMINS -->
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">
+      👑 Administradores (${admins.length})
+    </div>
+    <div id="acc-admins" style="margin-bottom:16px">
+      ${admins.map(u => renderFilaAcceso(u)).join('')}
+      <button class="btn-secondary" style="width:100%;padding:8px;font-size:13px;margin-top:6px;border-style:dashed" onclick="modalNuevoAcceso('ADMIN')">+ Agregar administrador</button>
+    </div>
+
+    <!-- SUPERVISORES -->
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--yellow);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">
+      🏷 Supervisores (${supervisores.length})
+    </div>
+    <div id="acc-supervisores" style="margin-bottom:16px">
+      ${supervisores.map(u => renderFilaAcceso(u)).join('')}
+      <button class="btn-secondary" style="width:100%;padding:8px;font-size:13px;margin-top:6px;border-style:dashed" onclick="modalNuevoAcceso('SUPERVISOR')">+ Agregar supervisor</button>
+    </div>
+
+    <!-- OPERARIOS -->
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text2);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">
+      👷 Operarios (${operarios.length})
+    </div>
+    <div id="acc-operarios">
+      <input id="acc-op-buscar" placeholder="🔍 Buscar operario..." oninput="filtrarAccesosOps()"
+        style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;outline:none;margin-bottom:8px">
+      <div id="acc-ops-lista">
+        ${operarios.map(u => renderFilaAcceso(u)).join('')}
+      </div>
+    </div>`;
+}
+
+function renderFilaAcceso(u) {
+  const rolColor = u.rol==='ADMIN'?'var(--accent)':u.rol==='SUPERVISOR'?'var(--yellow)':'var(--text3)';
+  const tienePass = !!u.password;
+  return `<div class="card-section" style="margin-bottom:6px;padding:10px 14px" id="acc-row-${u._id}">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:600;color:var(--text)">${u.nombre||'—'}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">
+          DNI/Usuario: <strong>${u.dni||'—'}</strong>
+          · Leg: ${u.legajo||'—'}
+          · <span style="color:${tienePass?'var(--green)':'var(--red)'}">${tienePass?'✓ Con contraseña':'⚠ Sin contraseña'}</span>
+        </div>
+        ${tienePass ? `<div style="font-size:11px;color:var(--text3);margin-top:1px">Contraseña: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">${u.password}</code></div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn-icon edit" title="Cambiar contraseña" onclick="modalCambiarPass('${u._id}','${(u.nombre||'').replace(/'/g,'')}','${u.dni||''}')">🔑</button>
+        <button class="btn-icon edit" title="Editar" onclick="modalOperario('${u._id}')">✏️</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function filtrarAccesosOps() {
+  const q = (document.getElementById('acc-op-buscar')?.value||'').toLowerCase().replace(/,/g,' ');
+  const ops = (window._accesosTodos||[]).filter(u=>u.rol==='OPERARIO');
+  const lista = q ? ops.filter(u=>(u.nombre||'').toLowerCase().replace(/,/g,' ').includes(q)||(u.dni||'').includes(q)) : ops;
+  const cont = document.getElementById('acc-ops-lista');
+  if (cont) cont.innerHTML = lista.map(u=>renderFilaAcceso(u)).join('');
+}
+
+function filtrarAccesos() {
+  const q = (document.getElementById('acc-buscar')?.value||'').toLowerCase().replace(/,/g,' ');
+  const todos = window._accesosTodos || [];
+  ['ADMIN','SUPERVISOR','OPERARIO'].forEach(rol => {
+    const lista = todos.filter(u=>u.rol===rol && ((u.nombre||'').toLowerCase().replace(/,/g,' ').includes(q)||(u.dni||'').includes(q)));
+    const key = rol==='ADMIN'?'admins':rol==='SUPERVISOR'?'supervisores':'ops-lista';
+    const cont = document.getElementById(`acc-${key}`);
+    if (cont) {
+      const html = lista.map(u=>renderFilaAcceso(u)).join('');
+      // Para admins y supervisores preservar el botón agregar
+      if (rol !== 'OPERARIO') {
+        const btn = cont.querySelector('button[onclick*="modalNuevoAcceso"]');
+        cont.innerHTML = html;
+        if (btn) cont.appendChild(btn);
+      } else {
+        cont.innerHTML = html;
+      }
+    }
+  });
+}
+
+// ── MODAL CAMBIAR CONTRASEÑA ──
+function modalCambiarPass(id, nombre, dni) {
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">🔑 Cambiar Contraseña</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">${nombre}</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:16px">DNI/Usuario: ${dni}</div>
+
+        <div class="field-sm">
+          <label>Nueva contraseña</label>
+          <input id="np-pass" type="text" placeholder="Mínimo 3 caracteres" autocomplete="off"
+            style="width:100%;background:var(--bg);border:1.5px solid var(--accent);color:var(--text);padding:10px 12px;border-radius:8px;font-size:16px;outline:none;letter-spacing:2px">
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:14px">
+          💡 Sugerencia para operarios: últimos 3 dígitos del legajo
+        </div>
+
+        <div class="field-sm">
+          <label>Confirmar contraseña</label>
+          <input id="np-pass2" type="text" placeholder="Repetí la contraseña" autocomplete="off"
+            style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-size:16px;outline:none;letter-spacing:2px">
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarNuevaPass('${id}','${dni}')">💾 GUARDAR CONTRASEÑA</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('np-pass')?.focus();
+}
+
+async function guardarNuevaPass(id, dni) {
+  const pass = document.getElementById('np-pass')?.value.trim();
+  const pass2 = document.getElementById('np-pass2')?.value.trim();
+  if (!pass) return toast('Ingresá la nueva contraseña', 'warn');
+  if (pass.length < 3) return toast('Mínimo 3 caracteres', 'warn');
+  if (pass !== pass2) return toast('Las contraseñas no coinciden', 'error');
+
+  showLoader(true);
+
+  // 1. Actualizar en Firestore
+  await fsSave('horas_usuarios', id, { password: pass });
+
+  // 2. Actualizar en Firebase Auth
+  const API_KEY = 'AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng';
+  const email = dni + '@megaclean.com.ar';
+  let passAuth = pass;
+  while (passAuth.length < 6) passAuth = passAuth + passAuth;
+  passAuth = passAuth.slice(0,6);
+
+  try {
+    // Intentar actualizar via signIn + updatePassword
+    const signInRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email, password: passAuth, returnSecureToken: true})
+    });
+    // Si falla el login (contraseña vieja distinta), crear usuario nuevo con nueva contraseña
+    // Firebase Auth update requires the user's current token — easier approach: delete+recreate
+    const signInData = await signInRes.json();
+    if (signInData.idToken) {
+      // Actualizar contraseña en Firebase Auth
+      await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${API_KEY}`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({idToken: signInData.idToken, password: passAuth, returnSecureToken: false})
+      });
+    }
+  } catch(e) {
+    console.warn('Firebase Auth update:', e);
+  }
+
+  invalidarCache('horas_usuarios');
+  showLoader(false);
+  cerrarModal();
+  toast('✓ Contraseña actualizada', 'ok');
+  renderGestionAccesos();
+}
+
+// ── MODAL NUEVO ACCESO (admin/supervisor) ──
+function modalNuevoAcceso(rol) {
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">➕ Nuevo ${rol === 'ADMIN' ? 'Administrador' : 'Supervisor'}</div>
+
+        <div class="field-sm"><label>Nombre completo</label><input id="na-nombre" placeholder="Ej: García, Juan Carlos"></div>
+        <div class="field-sm"><label>DNI / Usuario</label><input id="na-dni" placeholder="Ej: 28456789" autocomplete="off"></div>
+        <div class="field-sm">
+          <label>Contraseña</label>
+          <input id="na-pass" type="text" placeholder="Mínimo 3 caracteres" autocomplete="new-password"
+            style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-size:15px;outline:none;letter-spacing:2px">
+        </div>
+        ${rol === 'SUPERVISOR' ? `
+        <div class="field-sm">
+          <label>Nombre de supervisión <span style="color:var(--text3);font-size:10px">(debe coincidir con el campo supervisor en servicios)</span></label>
+          <input id="na-supnombre" placeholder="Ej: SUPERVISION CENTRICA">
+        </div>` : ''}
+
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarNuevoAcceso('${rol}')">✓ CREAR ${rol === 'ADMIN' ? 'ADMIN' : 'SUPERVISOR'}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function guardarNuevoAcceso(rol) {
+  const nombre = document.getElementById('na-nombre')?.value.trim();
+  const dni = document.getElementById('na-dni')?.value.trim();
+  const pass = document.getElementById('na-pass')?.value.trim();
+  const supervisor = document.getElementById('na-supnombre')?.value.trim() || '';
+
+  if (!nombre) return toast('El nombre es obligatorio', 'warn');
+  if (!dni) return toast('El DNI/usuario es obligatorio', 'warn');
+  if (!pass || pass.length < 3) return toast('La contraseña debe tener al menos 3 caracteres', 'warn');
+
+  showLoader(true);
+
+  // Crear en Firestore
+  const data = { nombre, dni, password: pass, rol, tipo: 'FIJO', activo: true };
+  if (supervisor) data.supervisor = supervisor;
+  const newId = await fsAdd('horas_usuarios', data);
+
+  // Crear en Firebase Auth
+  const API_KEY = 'AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng';
+  const email = dni + '@megaclean.com.ar';
+  let passAuth = pass;
+  while (passAuth.length < 6) passAuth = passAuth + passAuth;
+  passAuth = passAuth.slice(0,6);
+
+  await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({email, password: passAuth, returnSecureToken: false})
+  }).catch(()=>{});
+
+  invalidarCache('horas_usuarios');
+  showLoader(false);
+  cerrarModal();
+  toast(`✓ ${rol === 'ADMIN' ? 'Administrador' : 'Supervisor'} ${nombre} creado`, 'ok');
+  renderGestionAccesos();
+}
+
+
 // ════════════════════════════════════════════
 function esMiServicio(s) {
   // Un servicio es "mío" si mi nombre aparece en supervisor o idSupervisor
