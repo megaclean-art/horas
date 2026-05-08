@@ -2997,26 +2997,24 @@ async function renderReporteBancoHoras() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Banco de Horas</div><div style="text-align:center;padding:30px;color:var(--text3)">Calculando...</div>`;
 
-  const [operarios, fichadas, servicios] = await Promise.all([
-    fsList('horas_usuarios'), fsList('horas_fichadas'), fsList('horas_servicios')
+  const [operarios, fichadas, servicios, coberturas] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_fichadas'), fsList('horas_servicios'), fsList('horas_coberturas')
   ]);
 
   const mesActual = isoHoy().slice(0, 7);
   const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mesActual));
 
-  // Horas fichadas reales este mes por operario (para variables)
+  // Horas fichadas reales este mes por operario
   const horasFichadasMes = {};
   for (const f of fichadasMes) {
     if (!f.operarioId || !f.horasTrabajadas) continue;
     horasFichadasMes[f.operarioId] = (horasFichadasMes[f.operarioId] || 0) + f.horasTrabajadas;
   }
 
-  // Horas fijas por operario = horasPorSemana × 4 (si está guardado)
-  // o suma de (horasContratadas × diasSemana × 4) como fallback
+  // Horas fijas por operario desde servicios asignados
   const horasFijasMes = {};
   for (const s of servicios) {
     const opsS = Array.isArray(s.operarios) ? s.operarios : [];
-    // Usar horasPorSemana si existe, sino calcular desde horasContratadas × días
     const hsSemanales = Number(s.horasPorSemana) || (Number(s.horasContratadas)||0) * (s.dias?.length||0);
     const hsMensuales = hsSemanales * 4;
     for (const opId of opsS) {
@@ -3024,19 +3022,58 @@ async function renderReporteBancoHoras() {
     }
   }
 
-  // Total = horas fijas (servicios asignados × 4 semanas) + horas variables fichadas
-  // Un mismo operario puede tener ambas simultáneamente
+  // ── HORAS DE COBERTURA (reemplazante) ──
+  // Para coberturas activas del mes donde el operario es reemplazante
+  // Si ya fichó → usar horas fichadas (ya están en horasFichadasMes)
+  // Si NO fichó → calcular estimado desde días × horasContratadas y marcar como estimado
+  const horasCoberturaEstimadas = {}; // { operarioId: { hs, sinFichar } }
+
+  const cobMes = coberturas.filter(c =>
+    c.reemplazanteId &&
+    c.estado === 'ACTIVA' &&
+    c.fechaInicio?.slice(0,7) === mesActual
+  );
+
+  for (const cob of cobMes) {
+    const opId = cob.reemplazanteId;
+    // Calcular días trabajados en el período
+    const fi = new Date(cob.fechaInicio + 'T12:00:00');
+    const ff = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date();
+    const diasPeriodo = Math.max(1, Math.round((ff - fi) / (1000*60*60*24)) + 1);
+    const diasSemana = (cob.dias||[]).length || 5;
+    const semanas = diasPeriodo / 7;
+    const hsEstimadas = (Number(cob.horasContratadas)||0) * diasSemana * semanas;
+
+    // Verificar si ya fichó en alguna de estas coberturas
+    const fichadoCob = fichadasMes.some(f =>
+      f.operarioId === opId &&
+      f.coberturaId === cob._id
+    );
+
+    if (!horasCoberturaEstimadas[opId]) horasCoberturaEstimadas[opId] = { hs: 0, sinFichar: 0, conFichar: 0 };
+    if (fichadoCob) {
+      horasCoberturaEstimadas[opId].conFichar += hsEstimadas;
+    } else {
+      horasCoberturaEstimadas[opId].hs += hsEstimadas;
+      horasCoberturaEstimadas[opId].sinFichar += hsEstimadas;
+    }
+  }
+
+  // Total = fijas + variables fichadas + coberturas estimadas
   const ops = operarios.filter(o => o.rol === 'OPERARIO' && o.horasRecibo);
   const rows = ops.map(o => {
     const recibo = Number(o.horasRecibo) || 0;
     const hsFijas = horasFijasMes[o._id] || 0;
     const hsVariables = horasFichadasMes[o._id] || 0;
-    const trabajadas = hsFijas + hsVariables;
-    const fuente = hsFijas > 0 && hsVariables > 0 ? 'MIXTO'
+    const cobInfo = horasCoberturaEstimadas[o._id];
+    const hsCoberturas = cobInfo ? cobInfo.hs : 0;
+    const hsSinFichar = cobInfo ? cobInfo.sinFichar : 0;
+    const trabajadas = hsFijas + hsVariables + hsCoberturas;
+    const fuente = hsFijas > 0 && (hsVariables + hsCoberturas) > 0 ? 'MIXTO'
       : hsFijas > 0 ? 'FIJO'
-      : hsVariables > 0 ? 'VARIABLE' : '—';
+      : (hsVariables + hsCoberturas) > 0 ? 'VARIABLE' : '—';
     const diff = trabajadas - recibo;
-    return { op: o, recibo, trabajadas, hsFijas, hsVariables, diff, fuente };
+    return { op: o, recibo, trabajadas, hsFijas, hsVariables, hsCoberturas, hsSinFichar, diff, fuente };
   }).sort((a, b) => a.diff - b.diff);
 
   const nosDebenCount = rows.filter(r => r.diff < 0).length;
@@ -3115,14 +3152,17 @@ function filtrarBanco() {
       return `<div style="padding:11px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;align-items:center;${bg}">
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--text)">${r.op.nombre}</div>
-          <div style="font-size:11px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · <span style="background:${r.fuente==='FIJO'?'var(--accent-light)':r.fuente==='VARIABLE'?'var(--yellow-light)':'rgba(39,168,90,.1)'};color:${r.fuente==='FIJO'?'var(--accent)':r.fuente==='VARIABLE'?'var(--yellow)':'var(--green)'};padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">${r.fuente}</span>${r.fuente==='MIXTO'?` <span style="font-size:10px;color:var(--text3)">(${r.hsFijas.toFixed(0)}f+${r.hsVariables.toFixed(1)}v)</span>`:''}</div>
+          <div style="font-size:11px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · <span style="background:${r.fuente==='FIJO'?'var(--accent-light)':r.fuente==='VARIABLE'?'var(--yellow-light)':'rgba(39,168,90,.1)'};color:${r.fuente==='FIJO'?'var(--accent)':r.fuente==='VARIABLE'?'var(--yellow)':'var(--green)'};padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">${r.fuente}</span>${r.fuente==='MIXTO'?` <span style="font-size:10px;color:var(--text3)">(${r.hsFijas.toFixed(0)}f+${r.hsVariables.toFixed(1)}v${r.hsCoberturas>0?'+'+r.hsCoberturas.toFixed(1)+'cob':''})</span>`:''}</div>
+          ${r.hsSinFichar > 0 ? `<div style="font-size:10px;color:var(--yellow);font-weight:700;margin-top:2px">⚠ ${r.hsSinFichar.toFixed(1)}hs de cobertura estimadas sin fichar</div>` : ''}
+          ${r.hsCoberturas > 0 && r.hsSinFichar === 0 ? `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${r.hsCoberturas.toFixed(1)}hs de cobertura fichadas</div>` : ''}
         </div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.recibo}</div>
-        <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.trabajadas.toFixed(1)}</div>
+        <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.trabajadas.toFixed(1)}${r.hsSinFichar>0?'<span style="font-size:10px;color:var(--yellow)"> *</span>':''}</div>
         <div style="text-align:center;font-size:15px;font-weight:900;color:${diffColor}">${diffLabel}</div>
       </div>`;
     }).join('')}
-  </div>`;
+  </div>
+  ${rows.some(r=>r.hsSinFichar>0) ? `<div style="font-size:11px;color:var(--yellow);padding:8px 12px;background:rgba(224,123,42,.06);border-radius:8px;margin-top:8px">⚠ Los valores con * incluyen horas de cobertura <strong>estimadas</strong> sin fichar aún. Se actualizarán cuando el reemplazante fiche.</div>` : ''}`;
 }
 
 async function exportarBancoHoras() {
