@@ -1471,7 +1471,7 @@ function filtrarServicios() {
           </div>
         </div>
         <div class="list-item-actions" style="flex-shrink:0">
-          <button class="btn-icon" title="Ver detalle" onclick="verServicio(${JSON.stringify(s._ids)})">👁</button>
+          <button class="btn-icon" title="Ver detalle" onclick="verServicio('${primerIdStr}')">👁</button>
           <button class="btn-icon edit" title="Editar" onclick="modalServicio('${primerIdStr}')">✏️</button>
           <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>
         </div>
@@ -1821,9 +1821,7 @@ function filtrarOpsModal() {
   });
 }
 
-async function verServicio(ids) {
-  if (!Array.isArray(ids)) ids = [ids];
-  const id = ids[0];
+async function verServicio(id) {
   const s = await fsGet('horas_servicios', id);
   if (!s) return toast('No se pudo cargar el servicio', 'error');
   const ops = (Array.isArray(s.operarios)?s.operarios:[]).map(oid => _operariosCache.find(o=>o._id===oid)?.nombre||oid).filter(Boolean);
