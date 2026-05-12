@@ -3944,6 +3944,13 @@ async function exportarFeriadosMes() {
 // ── Pantalla principal con 4 sub-reportes ──
 async function renderReportes() {
   const c = document.getElementById('main-content');
+
+  // Verificar si hay datos con más de 6 meses
+  const ahora = new Date();
+  const hace6meses = new Date(ahora.getFullYear(), ahora.getMonth() - 6, 1).toISOString().slice(0,7);
+  const archivos = await fsGet('config', 'archivo_mensual') || {};
+  const mesesArchivados = archivos.meses || [];
+
   c.innerHTML = `
     <div class="section-title">Reportes</div>
     <div class="section-sub">Análisis de horas y asignaciones</div>
@@ -3972,18 +3979,30 @@ async function renderReportes() {
         <div style="font-size:11px;color:var(--text3);margin-top:4px">Resumen completo exportable a Excel</div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">
       ${currentUser.rol !== 'SUPERVISOR' ? `
       <div class="stat-card" style="cursor:pointer;border-color:rgba(39,168,90,.3)" onclick="exportarNovedadesLiquidacion()">
         <div style="font-size:28px;margin-bottom:6px">📋</div>
         <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--green)">Novedades Liquidación</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Ausencias del mes · Para liquidación de sueldos</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Ausencias del mes · Para liquidación</div>
       </div>
       <div class="stat-card" style="cursor:pointer;border-color:rgba(224,123,42,.3)" onclick="exportarFacturables()">
         <div style="font-size:28px;margin-bottom:6px">💰</div>
         <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--yellow)">Facturables</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Trabajos con cargo al cliente · Export Excel</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Trabajos con cargo al cliente</div>
       </div>` : ''}
+    </div>
+
+    <!-- ARCHIVO MENSUAL -->
+    <div class="stat-card" style="cursor:pointer;border-color:rgba(107,70,193,.3);background:rgba(107,70,193,.04)" onclick="renderArchivoMensual()">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:32px">🗄️</div>
+        <div>
+          <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:#6b46c1">Archivo Mensual</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">Descargar fichadas y coberturas a Excel · Limpiar datos antiguos</div>
+          ${mesesArchivados.length > 0 ? `<div style="font-size:11px;color:var(--green);margin-top:2px">✓ Último archivo: ${mesesArchivados[mesesArchivados.length-1]}</div>` : '<div style="font-size:11px;color:var(--yellow);margin-top:2px">⚠ Sin archivos aún</div>'}
+        </div>
+      </div>
     </div>`;
 }
 
@@ -4197,7 +4216,222 @@ async function exportarBancoHoras() {
   link.click(); toast('✓ Exportado', 'ok');
 }
 
-// ── REPORTE 2: POR OPERARIO ──
+// ════════════════════════════════════════════
+//  MÓDULO: ARCHIVO MENSUAL
+// ════════════════════════════════════════════
+async function renderArchivoMensual() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">🗄️ Archivo Mensual</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
+
+  const [fichadas, coberturas, configDoc] = await Promise.all([
+    fsList('horas_fichadas'),
+    fsList('horas_coberturas'),
+    fsGet('config', 'archivo_mensual')
+  ]);
+
+  const config = configDoc || { meses: [] };
+  const mesesArchivados = config.meses || [];
+
+  // Agrupar fichadas y coberturas por mes
+  const mesesFichadas = {};
+  for (const f of fichadas) {
+    const mes = f.fecha?.slice(0,7);
+    if (!mes) continue;
+    if (!mesesFichadas[mes]) mesesFichadas[mes] = { fichadas: [], coberturas: [] };
+    mesesFichadas[mes].fichadas.push(f);
+  }
+  for (const cob of coberturas) {
+    const mes = cob.fechaInicio?.slice(0,7);
+    if (!mes) continue;
+    if (!mesesFichadas[mes]) mesesFichadas[mes] = { fichadas: [], coberturas: [] };
+    mesesFichadas[mes].coberturas.push(cob);
+  }
+
+  const mesesDisponibles = Object.keys(mesesFichadas).sort().reverse();
+  const mesActual = isoHoy().slice(0,7);
+  const meses_nombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  // Detectar meses con más de 6 meses de antigüedad
+  const hace6 = new Date();
+  hace6.setMonth(hace6.getMonth() - 6);
+  const limite6meses = hace6.toISOString().slice(0,7);
+  const mesesAntiguos = mesesDisponibles.filter(m => m < limite6meses && !mesesArchivados.includes(m));
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+    <div class="section-title">🗄️ Archivo Mensual</div>
+    <div class="section-sub">Descargá los datos a Excel y mantené Firestore liviano</div>
+
+    ${mesesAntiguos.length > 0 ? `
+    <div style="background:rgba(214,61,74,.08);border:1.5px solid rgba(214,61,74,.3);border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--red);margin-bottom:6px">
+        ⚠ ${mesesAntiguos.length} mes${mesesAntiguos.length>1?'es':''} con más de 6 meses sin archivar
+      </div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:10px">
+        ${mesesAntiguos.map(m => {
+          const [y,mo] = m.split('-');
+          return `${meses_nombres[parseInt(mo)-1]} ${y}`;
+        }).join(', ')}
+      </div>
+      <button class="btn-primary" style="background:linear-gradient(135deg,var(--red),#b02a35)" onclick="archivarYBorrarAntiGuos(${JSON.stringify(mesesAntiguos)})">
+        📥 ARCHIVAR Y LIMPIAR TODOS
+      </button>
+    </div>` : mesesDisponibles.length > 0 ? `
+    <div style="background:var(--green-light);border:1.5px solid rgba(39,168,90,.3);border-radius:12px;padding:12px;margin-bottom:16px">
+      <div style="font-size:13px;color:var(--green);font-weight:600">✅ Todo al día — sin datos antiguos pendientes de archivar</div>
+    </div>` : ''}
+
+    ${mesesDisponibles.length === 0 ? `
+    <div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin datos de fichadas registrados aún</div></div>
+    ` : mesesDisponibles.map(mes => {
+      const [y, mo] = mes.split('-');
+      const label = `${meses_nombres[parseInt(mo)-1]} ${y}`;
+      const data = mesesFichadas[mes];
+      const archivado = mesesArchivados.includes(mes);
+      const esActual = mes === mesActual;
+      const antiguo = mes < limite6meses;
+
+      return `
+      <div class="card-section" style="margin-bottom:10px;${antiguo && !archivado?'border-color:rgba(214,61,74,.3);background:rgba(214,61,74,.04)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div style="font-family:var(--font-display);font-size:18px;font-weight:700">
+              📅 ${label}
+              ${esActual?'<span style="font-size:11px;background:var(--accent);color:#fff;padding:2px 7px;border-radius:8px;margin-left:6px">MES ACTUAL</span>':''}
+              ${antiguo && !archivado?'<span style="font-size:11px;background:var(--red);color:#fff;padding:2px 7px;border-radius:8px;margin-left:6px">⚠ +6 MESES</span>':''}
+            </div>
+            <div style="font-size:13px;color:var(--text2);margin-top:4px">
+              📍 ${data.fichadas.length} fichadas · 🔄 ${data.coberturas.length} coberturas
+            </div>
+            ${archivado?`<div style="font-size:12px;color:var(--green);margin-top:2px">✓ Archivado</div>`:''}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-secondary" style="flex:1;min-width:120px;padding:9px" onclick="descargarArchivoMes('${mes}')">
+            📥 Descargar Excel
+          </button>
+          ${!esActual ? `<button class="btn-secondary" style="flex:1;min-width:120px;padding:9px;${antiguo && !archivado?'border-color:var(--red);color:var(--red)':''}" onclick="archivarYBorrarMes('${mes}')">
+            🗑 Descargar y limpiar
+          </button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+async function descargarArchivoMes(mes) {
+  const [y, mo] = mes.split('-');
+  const meses_nombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const label = `${meses_nombres[parseInt(mo)-1]} ${y}`;
+
+  const [fichadas, coberturas, operarios, servicios] = await Promise.all([
+    fsList('horas_fichadas'), fsList('horas_coberturas'),
+    fsList('horas_usuarios'), fsList('horas_servicios')
+  ]);
+
+  const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mes));
+  const coberturasMes = coberturas.filter(c => c.fechaInicio?.startsWith(mes));
+
+  let csv = `ARCHIVO MENSUAL MEGACLEAN;${label}\n`;
+  csv += `Generado: ${new Date().toLocaleString('es-AR')}\n\n`;
+
+  // FICHADAS
+  csv += `FICHADAS (${fichadasMes.length})\n`;
+  csv += `Fecha;Operario;Legajo;Servicio;Dirección;Entrada;Salida;Horas;GPS OK;Distancia GPS\n`;
+  for (const f of fichadasMes.sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))) {
+    csv += [
+      f.fecha||'', f.operarioNombre||'', f.operarioLegajo||'',
+      f.clienteNombre||'', f.clienteDireccion||'',
+      f.entrada||'', f.salida||'',
+      (f.horasTrabajadas||0).toFixed(2),
+      f.gpsOk?'SI':'NO', Math.round(f.distanciaEntrada||0)+'m'
+    ].join(';') + '\n';
+  }
+
+  csv += `\nCOBERTURAS / AUSENCIAS (${coberturasMes.length})\n`;
+  csv += `Tipo;Operario Ausente;Reemplazante;Motivo;Servicio;Fecha Inicio;Fecha Fin;Hs/Día;Estado\n`;
+  for (const cob of coberturasMes) {
+    csv += [
+      cob.tipoCob||'AUSENCIA',
+      cob.ausenteNombre||cob.operarioNombre||'',
+      cob.reemplazanteNombre||'—',
+      cob.motivo||'',
+      cob.clienteNombre||'',
+      cob.fechaInicio||'', cob.fechaFin||'',
+      cob.horasContratadas||cob.horasTotal||0,
+      cob.estado||''
+    ].join(';') + '\n';
+  }
+
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `MegaClean_Archivo_${mes}.csv`;
+  link.click();
+  toast(`✓ Archivo ${label} descargado`, 'ok');
+}
+
+async function archivarYBorrarMes(mes) {
+  const [y, mo] = mes.split('-');
+  const meses_nombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const label = `${meses_nombres[parseInt(mo)-1]} ${y}`;
+
+  if (!confirm(`¿Archivar y limpiar ${label}?\n\n1. Se descargará el Excel completo\n2. Se borrarán las fichadas y coberturas de ese mes de Firestore\n\nAsegurate de guardar el Excel antes de confirmar.`)) return;
+
+  // Primero descargar
+  await descargarArchivoMes(mes);
+
+  // Esperar 2 segundos para que descargue
+  await new Promise(r => setTimeout(r, 2000));
+
+  showLoader(true);
+
+  const [fichadas, coberturas] = await Promise.all([
+    fsList('horas_fichadas'), fsList('horas_coberturas')
+  ]);
+
+  // Borrar fichadas del mes
+  const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mes));
+  let borrados = 0;
+  for (const f of fichadasMes) {
+    await fsDelete('horas_fichadas', f._id);
+    borrados++;
+    if (borrados % 20 === 0) await new Promise(r => setTimeout(r, 200)); // pausa cada 20
+  }
+
+  // Borrar coberturas cerradas del mes
+  const cobMes = coberturas.filter(c =>
+    c.fechaInicio?.startsWith(mes) && c.estado === 'CERRADA'
+  );
+  for (const cob of cobMes) {
+    await fsDelete('horas_coberturas', cob._id);
+  }
+
+  // Registrar como archivado
+  const configDoc = await fsGet('config', 'archivo_mensual') || { meses: [] };
+  const meses = configDoc.meses || [];
+  if (!meses.includes(mes)) meses.push(mes);
+  await fsSave('config', 'archivo_mensual', { meses });
+
+  // Invalidar caches
+  invalidarCache('horas_fichadas');
+  invalidarCache('horas_coberturas');
+
+  showLoader(false);
+  toast(`✓ ${label} archivado — ${borrados} fichadas y ${cobMes.length} coberturas eliminadas`, 'ok');
+  renderArchivoMensual();
+}
+
+async function archivarYBorrarAntiGuos(meses) {
+  if (!confirm(`¿Archivar y limpiar ${meses.length} meses antiguos?\n\nSe descargarán todos en un solo Excel y se borrarán de Firestore.`)) return;
+
+  for (const mes of meses) {
+    await archivarYBorrarMes(mes);
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  toast('✅ Todos los meses antiguos archivados', 'ok');
+}
+
+
 async function renderReporteOperario() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Por Operario</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
