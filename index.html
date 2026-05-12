@@ -555,16 +555,12 @@ function initFirebase() {
     try {
       if (!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
       fbAuth = firebase.auth();
-    } catch(e) {
-      console.warn('Firebase init error:', e);
-    }
-  } else {
-    console.warn('Firebase SDK no cargado — modo sin auth');
+    } catch(e) { console.warn('Firebase init error:', e); }
   }
 }
-// Intentar inicializar ahora y también cuando cargue la página
+// Intentar ahora y al cargar la página
 initFirebase();
-if (!fbAuth) window.addEventListener('load', initFirebase);
+if (!fbAuth) document.addEventListener('DOMContentLoaded', initFirebase);
 
 // Token de autenticación actual
 let _authToken = null;
@@ -4088,11 +4084,49 @@ async function renderReporteBancoHoras() {
     }
   }
 
+  // ── OPERARIOS EN LICENCIA POR ENFERMEDAD ──
+  // Si tienen una cobertura AUSENCIA activa con motivo lic. por enfermedad este mes
+  // sus horas fijas NO se computan mientras dure la licencia
+  const enLicencia = {}; // { operarioId: { cob, diasLicencia } }
+  const hoy = isoHoy();
+
+  const cobsLicencia = coberturas.filter(c =>
+    c.tipoCob === 'AUSENCIA' &&
+    c.estado === 'ACTIVA' &&
+    c.motivo === 'Lic. por enfermedad' &&
+    c.ausenteId &&
+    c.fechaInicio <= hoy &&
+    (!c.fechaFin || c.fechaFin >= mesActual + '-01')
+  );
+
+  for (const cob of cobsLicencia) {
+    // Calcular días de licencia dentro del mes actual
+    const fi = new Date(Math.max(new Date(cob.fechaInicio + 'T12:00:00'), new Date(mesActual + '-01T12:00:00')));
+    const ff = new Date(Math.min(
+      cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date(hoy + 'T12:00:00'),
+      new Date(hoy + 'T12:00:00')
+    ));
+    const diasLicencia = Math.max(0, Math.round((ff - fi) / (1000*60*60*24)) + 1);
+    enLicencia[cob.ausenteId] = { cob, diasLicencia, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin };
+  }
+
   // Total = fijas + variables fichadas + coberturas estimadas
   const ops = operarios.filter(o => o.rol === 'OPERARIO' && o.horasRecibo);
   const rows = ops.map(o => {
     const recibo = Number(o.horasRecibo) || 0;
-    const hsFijas = horasFijasMes[o._id] || 0;
+    const licInfo = enLicencia[o._id];
+
+    // Si está en licencia → calcular proporción de horas fijas a descontar
+    let hsFijas = horasFijasMes[o._id] || 0;
+    let hsFijasDescontadas = 0;
+    if (licInfo) {
+      // Días hábiles de licencia / días hábiles del mes × horas fijas mensuales
+      const diasMes = new Date(parseInt(mesActual.split('-')[0]), parseInt(mesActual.split('-')[1]), 0).getDate();
+      const proporcion = Math.min(1, licInfo.diasLicencia / diasMes);
+      hsFijasDescontadas = hsFijas * proporcion;
+      hsFijas = Math.max(0, hsFijas - hsFijasDescontadas);
+    }
+
     const hsVariables = horasFichadasMes[o._id] || 0;
     const cobInfo = horasCoberturaEstimadas[o._id];
     const hsCoberturas = cobInfo ? cobInfo.hs : 0;
@@ -4102,12 +4136,18 @@ async function renderReporteBancoHoras() {
       : hsFijas > 0 ? 'FIJO'
       : (hsVariables + hsCoberturas) > 0 ? 'VARIABLE' : '—';
     const diff = trabajadas - recibo;
-    return { op: o, recibo, trabajadas, hsFijas, hsVariables, hsCoberturas, hsSinFichar, diff, fuente };
-  }).sort((a, b) => a.diff - b.diff);
+    return { op: o, recibo, trabajadas, hsFijas, hsVariables, hsCoberturas, hsSinFichar, diff, fuente, licInfo, hsFijasDescontadas };
+  }).sort((a, b) => {
+    // Licencias primero, luego por diferencia
+    if (a.licInfo && !b.licInfo) return -1;
+    if (!a.licInfo && b.licInfo) return 1;
+    return a.diff - b.diff;
+  });
 
-  const nosDebenCount = rows.filter(r => r.diff < 0).length;
-  const debemosCount = rows.filter(r => r.diff > 0).length;
-  const equilibrio = rows.filter(r => r.diff === 0).length;
+  const nosDebenCount = rows.filter(r => r.diff < 0 && !r.licInfo).length;
+  const debemosCount = rows.filter(r => r.diff > 0 && !r.licInfo).length;
+  const equilibrio = rows.filter(r => r.diff === 0 && !r.licInfo).length;
+  const licenciaCount = rows.filter(r => r.licInfo).length;
 
   const [y, m] = mesActual.split('-');
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -4117,18 +4157,22 @@ async function renderReporteBancoHoras() {
     <div class="section-title">⚖️ Banco de Horas</div>
     <div class="section-sub">${meses[parseInt(m)-1]} ${y}</div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
-      <div class="stat-card" style="border-color:rgba(214,61,74,.3)">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+      <div class="stat-card" style="border-color:rgba(214,61,74,.3);cursor:pointer" onclick="document.getElementById('rp-filtro').value='deben';filtrarBanco()">
         <div class="stat-num" style="color:var(--red)">${nosDebenCount}</div>
-        <div class="stat-label">Nos deben horas</div>
+        <div class="stat-label">Nos deben</div>
       </div>
-      <div class="stat-card" style="border-color:rgba(39,168,90,.3)">
+      <div class="stat-card" style="border-color:rgba(39,168,90,.3);cursor:pointer" onclick="document.getElementById('rp-filtro').value='debemos';filtrarBanco()">
         <div class="stat-num" style="color:var(--green)">${debemosCount}</div>
         <div class="stat-label">Les debemos</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card" style="cursor:pointer" onclick="document.getElementById('rp-filtro').value='ok';filtrarBanco()">
         <div class="stat-num">${equilibrio}</div>
-        <div class="stat-label">En equilibrio</div>
+        <div class="stat-label">Equilibrio</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(26,143,203,.3);cursor:pointer;background:rgba(26,143,203,.04)" onclick="document.getElementById('rp-filtro').value='licencia';filtrarBanco()">
+        <div class="stat-num" style="color:var(--accent)">${licenciaCount}</div>
+        <div class="stat-label">🏥 En licencia</div>
       </div>
     </div>
 
@@ -4141,6 +4185,7 @@ async function renderReporteBancoHoras() {
         <option value="deben">Nos deben horas</option>
         <option value="debemos">Les debemos</option>
         <option value="ok">En equilibrio</option>
+        <option value="licencia">🏥 En licencia</option>
       </select>
       <button class="btn-secondary" style="padding:9px 14px;font-size:13px" onclick="exportarBancoHoras()">⬇ Excel</button>
     </div>
@@ -4157,10 +4202,11 @@ function filtrarBanco() {
   const filtro = document.getElementById('rp-filtro')?.value || '';
   let rows = window._bancoRows || [];
 
-  if (q) rows = rows.filter(r => (r.op.nombre||'').toLowerCase().includes(q));
-  if (filtro === 'deben') rows = rows.filter(r => r.diff < 0);
-  else if (filtro === 'debemos') rows = rows.filter(r => r.diff > 0);
-  else if (filtro === 'ok') rows = rows.filter(r => r.diff === 0);
+  if (q) rows = rows.filter(r => (r.op.nombre||'').toLowerCase().replace(/,/g,' ').includes(q.replace(/,/g,' ')));
+  if (filtro === 'deben') rows = rows.filter(r => r.diff < 0 && !r.licInfo);
+  else if (filtro === 'debemos') rows = rows.filter(r => r.diff > 0 && !r.licInfo);
+  else if (filtro === 'ok') rows = rows.filter(r => r.diff === 0 && !r.licInfo);
+  else if (filtro === 'licencia') rows = rows.filter(r => r.licInfo);
 
   const cont = document.getElementById('banco-tabla');
   if (!cont) return;
@@ -4175,20 +4221,38 @@ function filtrarBanco() {
       <div>Operario</div><div style="text-align:center">Recibo</div><div style="text-align:center">Trabajadas</div><div style="text-align:center">Diferencia</div>
     </div>
     ${rows.map((r, i) => {
+      const esLicencia = !!r.licInfo;
+      const bg = esLicencia
+        ? 'background:rgba(26,143,203,.04)'
+        : i % 2 === 0 ? '' : 'background:var(--surface2)';
       const diffColor = r.diff < 0 ? 'var(--red)' : r.diff > 0 ? 'var(--green)' : 'var(--text3)';
       const diffLabel = r.diff < 0 ? `${r.diff.toFixed(1)}hs` : r.diff > 0 ? `+${r.diff.toFixed(1)}hs` : '—';
-      const bg = i % 2 === 0 ? '' : 'background:var(--surface2)';
       return `<div style="padding:11px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;align-items:center;${bg}">
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--text)">${r.op.nombre}</div>
-          <div style="font-size:11px;color:var(--text3)">Leg. ${r.op.legajo||'—'} · <span style="background:${r.fuente==='FIJO'?'var(--accent-light)':r.fuente==='VARIABLE'?'var(--yellow-light)':'rgba(39,168,90,.1)'};color:${r.fuente==='FIJO'?'var(--accent)':r.fuente==='VARIABLE'?'var(--yellow)':'var(--green)'};padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">${r.fuente}</span>${r.fuente==='MIXTO'?` <span style="font-size:10px;color:var(--text3)">(${r.hsFijas.toFixed(0)}f+${r.hsVariables.toFixed(1)}v${r.hsCoberturas>0?'+'+r.hsCoberturas.toFixed(1)+'cob':''})</span>`:''}</div>
-          ${r.hsSinFichar > 0 ? `<div style="font-size:10px;color:var(--yellow);font-weight:700;margin-top:2px">⚠ ${r.hsSinFichar.toFixed(1)}hs de cobertura estimadas sin fichar</div>` : ''}
-          ${r.hsCoberturas > 0 && r.hsSinFichar === 0 ? `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${r.hsCoberturas.toFixed(1)}hs de cobertura fichadas</div>` : ''}
+          <div style="font-size:11px;color:var(--text3);margin-top:1px">
+            Leg. ${r.op.legajo||'—'}
+            ${esLicencia
+              ? `· <span style="background:var(--accent);color:#fff;padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700">🏥 LIC. ENFERMEDAD</span>`
+              : `· <span style="background:${r.fuente==='FIJO'?'var(--accent-light)':r.fuente==='VARIABLE'?'var(--yellow-light)':'rgba(39,168,90,.1)'};color:${r.fuente==='FIJO'?'var(--accent)':r.fuente==='VARIABLE'?'var(--yellow)':'var(--green)'};padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">${r.fuente}</span>`
+            }
+          </div>
+          ${esLicencia ? `<div style="font-size:10px;color:var(--accent);margin-top:2px">
+            Desde ${r.licInfo.fechaInicio} ${r.licInfo.fechaFin?'→ '+r.licInfo.fechaFin:'→ abierto'} · ${r.licInfo.diasLicencia} días este mes
+            ${r.hsFijasDescontadas > 0 ? `· <span style="color:var(--text3)">${r.hsFijasDescontadas.toFixed(0)}hs fijas descontadas</span>` : ''}
+          </div>` : ''}
+          ${!esLicencia && r.hsSinFichar > 0 ? `<div style="font-size:10px;color:var(--yellow);font-weight:700;margin-top:2px">⚠ ${r.hsSinFichar.toFixed(1)}hs de cobertura estimadas sin fichar</div>` : ''}
+          ${!esLicencia && r.hsCoberturas > 0 && r.hsSinFichar === 0 ? `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${r.hsCoberturas.toFixed(1)}hs de cobertura fichadas</div>` : ''}
         </div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.recibo}</div>
-        <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.trabajadas.toFixed(1)}${r.hsSinFichar>0?'<span style="font-size:10px;color:var(--yellow)"> *</span>':''}</div>
-        <div style="text-align:center;font-size:15px;font-weight:900;color:${diffColor}">${diffLabel}</div>
+        <div style="text-align:center;font-size:14px;font-weight:700;color:${esLicencia?'var(--accent)':'var(--text2)'}">
+          ${esLicencia ? `${r.trabajadas.toFixed(1)}<span style="font-size:9px;display:block;color:var(--accent)">+lic</span>` : `${r.trabajadas.toFixed(1)}${r.hsSinFichar>0?'<span style="font-size:10px;color:var(--yellow)"> *</span>':''}`}
+        </div>
+        <div style="text-align:center;font-size:15px;font-weight:900;color:${esLicencia?'var(--accent)':diffColor}">
+          ${esLicencia ? '🏥' : diffLabel}
+        </div>
       </div>`;
+    }).join('')}
     }).join('')}
   </div>
   ${rows.some(r=>r.hsSinFichar>0) ? `<div style="font-size:11px;color:var(--yellow);padding:8px 12px;background:rgba(224,123,42,.06);border-radius:8px;margin-top:8px">⚠ Los valores con * incluyen horas de cobertura <strong>estimadas</strong> sin fichar aún. Se actualizarán cuando el reemplazante fiche.</div>` : ''}`;
