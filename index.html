@@ -4091,10 +4091,9 @@ async function renderReporteBancoHoras() {
   const hoy = isoHoy();
 
   const cobsLicencia = coberturas.filter(c =>
-    c.tipoCob === 'AUSENCIA' &&
     c.estado === 'ACTIVA' &&
     c.motivo === 'Lic. por enfermedad' &&
-    c.ausenteId &&
+    (c.ausenteId || c.operarioId) &&
     c.fechaInicio <= hoy &&
     (!c.fechaFin || c.fechaFin >= mesActual + '-01')
   );
@@ -4107,7 +4106,8 @@ async function renderReporteBancoHoras() {
       new Date(hoy + 'T12:00:00')
     ));
     const diasLicencia = Math.max(0, Math.round((ff - fi) / (1000*60*60*24)) + 1);
-    enLicencia[cob.ausenteId] = { cob, diasLicencia, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin };
+    const opIdLic = cob.ausenteId || cob.operarioId;
+    if (opIdLic) enLicencia[opIdLic] = { cob, diasLicencia, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin };
   }
 
   // Total = fijas + variables fichadas + coberturas estimadas
@@ -4252,7 +4252,6 @@ function filtrarBanco() {
           ${esLicencia ? '🏥' : diffLabel}
         </div>
       </div>`;
-    }).join('')}
     }).join('')}
   </div>
   ${rows.some(r=>r.hsSinFichar>0) ? `<div style="font-size:11px;color:var(--yellow);padding:8px 12px;background:rgba(224,123,42,.06);border-radius:8px;margin-top:8px">⚠ Los valores con * incluyen horas de cobertura <strong>estimadas</strong> sin fichar aún. Se actualizarán cuando el reemplazante fiche.</div>` : ''}`;
