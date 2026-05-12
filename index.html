@@ -1068,11 +1068,14 @@ async function renderDashboard() {
     const en3dias = new Date(); en3dias.setDate(en3dias.getDate() + 3);
     const en3diasStr = en3dias.toISOString().slice(0,10);
 
-    const licenciasActivas = coberturas.filter(c =>
-      c.estado === 'ACTIVA' &&
-      c.motivo === 'Lic. por enfermedad' &&
-      c.fechaFin // solo las que tienen fecha de fin definida
-    );
+    const licenciasActivas = coberturas.filter(c => {
+      const motivo = (c.motivo||'').toLowerCase().trim();
+      return (
+        c.estado === 'ACTIVA' &&
+        (motivo.includes('enfermedad')) &&
+        c.fechaFin
+      );
+    });
 
     const venceManana = licenciasActivas.filter(c => c.fechaFin === mananaStr);
     const venceEn3 = licenciasActivas.filter(c => c.fechaFin > mananaStr && c.fechaFin <= en3diasStr);
@@ -4016,11 +4019,8 @@ async function exportarFeriadosMes() {
 async function renderReportes() {
   const c = document.getElementById('main-content');
 
-  // Verificar si hay datos con más de 6 meses
-  const ahora = new Date();
-  const hace6meses = new Date(ahora.getFullYear(), ahora.getMonth() - 6, 1).toISOString().slice(0,7);
-  const archivos = await fsGet('config', 'archivo_mensual') || {};
-  const mesesArchivados = archivos.meses || [];
+  // No llamar a Firestore acá — mostrar directo sin el estado de archivo
+  const mesesArchivados = [];
 
   c.innerHTML = `
     <div class="section-title">Reportes</div>
@@ -4165,13 +4165,17 @@ async function renderReporteBancoHoras() {
   const enLicencia = {}; // { operarioId: { cob, diasLicencia } }
   const hoy = isoHoy();
 
-  const cobsLicencia = coberturas.filter(c =>
-    c.estado === 'ACTIVA' &&
-    c.motivo === 'Lic. por enfermedad' &&
-    (c.ausenteId || c.operarioId) &&
-    c.fechaInicio <= hoy &&
-    (!c.fechaFin || c.fechaFin >= mesActual + '-01')
-  );
+  const cobsLicencia = coberturas.filter(c => {
+    const motivo = (c.motivo||'').toLowerCase().trim();
+    const opId = c.ausenteId || c.operarioId;
+    return (
+      c.estado === 'ACTIVA' &&
+      (motivo.includes('enfermedad') || motivo.includes('lic') && motivo.includes('enf')) &&
+      opId &&
+      c.fechaInicio <= hoy &&
+      (!c.fechaFin || c.fechaFin >= mesActual + '-01')
+    );
+  });
 
   for (const cob of cobsLicencia) {
     // Calcular días de licencia dentro del mes actual
