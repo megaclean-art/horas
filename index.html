@@ -453,10 +453,48 @@ async function fsGet(col, id) {
   return fromFS(await r.json());
 }
 
-// Cache simple por sesión para evitar requests repetidas
+// Cache con TTL diferenciado por colección
 const _fsCache = {};
 const _fsCacheTime = {};
-const CACHE_TTL = 300000; // 5 minutos
+
+// TTL por colección (ms): fichadas más corto, resto 5 minutos
+const CACHE_TTL_MAP = {
+  'horas_fichadas': 180000,   // 3 minutos
+};
+const CACHE_TTL_DEFAULT = 300000; // 5 minutos para todo lo demás
+
+function getCacheTTL(col) {
+  return CACHE_TTL_MAP[col] !== undefined ? CACHE_TTL_MAP[col] : CACHE_TTL_DEFAULT;
+}
+
+// sessionStorage: persiste el caché entre recargas de página en la misma sesión
+function _ssKey(col) { return 'fscache_' + col; }
+function _ssTimeKey(col) { return 'fscachetime_' + col; }
+
+function _loadFromSS(col) {
+  try {
+    const t = parseInt(sessionStorage.getItem(_ssTimeKey(col)) || '0');
+    if (!t) return null;
+    if ((Date.now() - t) >= getCacheTTL(col)) return null;
+    const raw = sessionStorage.getItem(_ssKey(col));
+    if (!raw) return null;
+    return { data: JSON.parse(raw), time: t };
+  } catch(e) { return null; }
+}
+
+function _saveToSS(col, data) {
+  try {
+    sessionStorage.setItem(_ssKey(col), JSON.stringify(data));
+    sessionStorage.setItem(_ssTimeKey(col), String(Date.now()));
+  } catch(e) { /* sessionStorage lleno, ignorar */ }
+}
+
+function _clearSS(col) {
+  try {
+    sessionStorage.removeItem(_ssKey(col));
+    sessionStorage.removeItem(_ssTimeKey(col));
+  } catch(e) {}
+}
 
 async function fsListPage(col, pageToken) {
   const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
@@ -472,10 +510,22 @@ async function fsListPage(col, pageToken) {
 
 async function fsList(col) {
   const now = Date.now();
-  if (_fsCache[col] && (now - (_fsCacheTime[col]||0)) < CACHE_TTL) {
+  const ttl = getCacheTTL(col);
+
+  // 1. Caché en memoria
+  if (_fsCache[col] && (now - (_fsCacheTime[col]||0)) < ttl) {
     return _fsCache[col];
   }
 
+  // 2. Caché en sessionStorage (sobrevive recargas de página)
+  const ss = _loadFromSS(col);
+  if (ss) {
+    _fsCache[col] = ss.data;
+    _fsCacheTime[col] = ss.time;
+    return _fsCache[col];
+  }
+
+  // 3. Ir a Firestore
   let allDocs = [];
   let pageToken = '';
   let safety = 0;
@@ -492,12 +542,26 @@ async function fsList(col) {
 
   _fsCache[col] = allDocs;
   _fsCacheTime[col] = now;
+  _saveToSS(col, allDocs);
   return allDocs;
 }
 
 function invalidarCache(col) {
   delete _fsCache[col];
   delete _fsCacheTime[col];
+  _clearSS(col);
+}
+
+// Prefetch al login: carga las colecciones principales en paralelo
+// para que las pantallas las encuentren ya en caché
+async function prefetchColecciones() {
+  try {
+    await Promise.all([
+      fsList('horas_usuarios'),
+      fsList('horas_servicios'),
+      fsList('horas_fichadas'),
+    ]);
+  } catch(e) { /* silencioso, no bloquear login */ }
 }
 
 async function fsSave(col, id, data) {
@@ -669,6 +733,8 @@ function iniciarApp() {
   document.getElementById('topbar-role').textContent = currentUser.rol;
   renderTabs();
   navigateTo(currentUser.rol === 'OPERARIO' ? 'fichar' : currentUser.rol === 'SUPERVISOR' ? 'sup-dashboard' : 'dashboard');
+  // Prefetch en background: carga colecciones principales una sola vez al login
+  prefetchColecciones();
 }
 
 // ════════════════════════════════════════════
