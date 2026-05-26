@@ -3889,9 +3889,9 @@ function renderFeriadoCard(f, pasado) {
                   <div style="font-size:11px;color:var(--text2)">🏢 ${a.clienteNombre} · ${a.horaInicio||'--:--'} – ${a.horaFin||'--:--'} · <strong>${a.horasEstimadas||0}hs</strong></div>
                   ${a.nota?`<div style="font-size:11px;color:var(--accent);margin-top:1px">💬 ${a.nota}</div>`:''}
                 </div>
-                ${!pasado?`<button class="btn-icon" onclick="eliminarAsignacionFeriado('${f._id}','${a.operarioId}')">🗑</button>`:''}
+                <button class="btn-icon" onclick="eliminarAsignacionFeriado('${f._id}','${a.operarioId}')">🗑</button>
               </div>`).join('')}
-          ${!pasado?`<button class="btn-secondary" style="margin-top:8px;padding:7px 14px;font-size:13px" onclick="modalAsignarFeriado('${f._id}')">+ Agregar operario</button>`:''}
+          <button class="btn-secondary" style="margin-top:8px;padding:7px 14px;font-size:13px" onclick="modalAsignarFeriado('${f._id}')">+ Agregar operario</button>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
