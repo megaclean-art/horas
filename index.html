@@ -797,6 +797,18 @@ function fechaHoy() {
   const d = new Date();
   return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
 }
+// Helper retrocompatible: devuelve array de IDs sin importar si operarios es [string] o [{id,...}]
+function normOps(operarios) {
+  if (!Array.isArray(operarios)) return [];
+  return operarios.map(o => (typeof o === 'string' ? o : o?.id)).filter(Boolean);
+}
+// Helper: obtiene fechaInicio de un operario en un servicio
+function fechaInicioOp(operarios, opId) {
+  if (!Array.isArray(operarios)) return '';
+  const o = operarios.find(x => (typeof x === 'string' ? x : x?.id) === opId);
+  return (typeof o === 'object' && o?.fechaInicio) ? o.fechaInicio : '';
+}
+
 function isoHoy() {
   return new Date().toISOString().split('T')[0];
 }
@@ -858,7 +870,7 @@ async function cargarServiciosHoy() {
   // Servicios fijos asignados
   const serviciosHoy = servicios.filter(s => {
     const dias = s.dias || [];
-    const operariosIds = s.operarios ? (Array.isArray(s.operarios) ? s.operarios : s.operarios.split(',')) : [];
+    const operariosIds = normOps(s.operarios);
     return dias.includes(diaStr) && (operariosIds.includes(currentUser._id) || operariosIds.includes(String(currentUser._id)));
   });
 
@@ -1328,7 +1340,7 @@ async function verOperario(id) {
   const o = await fsGet('horas_usuarios', id);
   if (!o) return toast('No se pudo cargar el operario', 'error');
   const servicios = await fsList('horas_servicios');
-  const srvs = servicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(id));
+  const srvs = servicios.filter(s => normOps(s.operarios).includes(id));
 
   const m = document.getElementById('modal-container');
   m.innerHTML = `
@@ -1561,7 +1573,7 @@ function filtrarServicios() {
   if (filtroSup) lista = lista.filter(s => (s.supervisor||s.idSupervisor||'') === filtroSup);
   if (filtroAdmin) lista = lista.filter(s => s.adminCliente === filtroAdmin);
   if (filtroOp) lista = lista.filter(s => {
-    const ops = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+    const ops = normOps(s.operarios);
     return ops.includes(filtroOp);
   });
 
@@ -1572,10 +1584,10 @@ function filtrarServicios() {
     const diasKey = (s.dias||[]).slice().sort().join('-');
     const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
     if (!grupos[clave]) {
-      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...(Array.isArray(s.operarios)?s.operarios:(s.operarios?[s.operarios]:[])) ] };
+      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...normOps(s.operarios)] };
     } else {
       // Agregar operarios del duplicado al grupo
-      const opsNuevos = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+      const opsNuevos = normOps(s.operarios);
       for (const op of opsNuevos) {
         if (!grupos[clave]._operariosAll.includes(op)) grupos[clave]._operariosAll.push(op);
       }
@@ -1640,7 +1652,13 @@ async function modalServicio(id = null) {
   }
 
   const esEdicion = !!id;
-  const opsIds = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+  // Soporte retrocompatible: operarios puede ser [string] o [{id, fechaInicio}]
+  const opsRaw = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+  // Normalizar a objetos {id, fechaInicio}
+  const opsObjs = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
+  const opsIds = opsObjs.map(o => o.id);
+  const opsFechaMap = {}; // id -> fechaInicio
+  opsObjs.forEach(o => { opsFechaMap[o.id] = o.fechaInicio || ''; });
   const opsList = operarios.filter(o => o.rol === 'OPERARIO').sort((a,b) => a.nombre.localeCompare(b.nombre));
 
   // Horarios por día — leer estructura existente o heredar el horario general
@@ -1706,13 +1724,21 @@ async function modalServicio(id = null) {
             style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none;margin-bottom:6px">
           <div id="sv-ops-lista" style="max-height:180px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 0">
             ${opsList.map(o => `
-              <div class="list-item" style="padding:7px 12px" id="op-row-${o._id}">
-                <div class="list-item-info">
-                  <div style="font-size:14px;font-weight:500">${o.nombre}</div>
-                  <div style="font-size:11px;color:var(--text3)">DNI: ${o.dni||'—'}</div>
+              <div class="list-item" style="padding:7px 10px;flex-wrap:wrap;gap:4px" id="op-row-${o._id}">
+                <div style="display:flex;align-items:center;gap:10px;width:100%">
+                  <input type="checkbox" id="chk-${o._id}" ${opsIds.includes(o._id)?'checked':''}
+                    style="width:18px;height:18px;accent-color:var(--accent);flex-shrink:0"
+                    onchange="toggleFechaInicioOp('${o._id}')">
+                  <div class="list-item-info" style="flex:1">
+                    <div style="font-size:14px;font-weight:500">${o.nombre}</div>
+                    <div style="font-size:11px;color:var(--text3)">DNI: ${o.dni||'—'}</div>
+                  </div>
                 </div>
-                <input type="checkbox" id="chk-${o._id}" ${opsIds.includes(o._id)?'checked':''}
-                  style="width:20px;height:20px;accent-color:var(--accent);flex-shrink:0">
+                <div id="fecha-row-${o._id}" style="display:${opsIds.includes(o._id)?'flex':'none'};align-items:center;gap:6px;padding:4px 0 2px 28px;width:100%">
+                  <span style="font-size:11px;color:var(--text3);white-space:nowrap">Desde:</span>
+                  <input type="date" id="fecha-${o._id}" value="${opsFechaMap[o._id]||''}"
+                    style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);outline:none">
+                </div>
               </div>`).join('')}
           </div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px">Podés seleccionar varios operarios</div>
@@ -1906,7 +1932,14 @@ async function guardarServicio(id = '') {
   const supervisor = document.getElementById('sv-sup').value.trim();
   const adminCliente = document.getElementById('sv-admin')?.value.trim() || '';
   const radioGps = Number(document.getElementById('sv-radio').value) || 300;
-  const operariosSelec = Array.from(document.querySelectorAll('[id^="chk-"]')).filter(c=>c.checked).map(c=>c.id.replace('chk-',''));
+  // Guardar operarios como [{id, fechaInicio}] para trazabilidad
+  const operariosSelec = Array.from(document.querySelectorAll('[id^="chk-"]'))
+    .filter(c => c.checked)
+    .map(c => {
+      const opId = c.id.replace('chk-', '');
+      const fi = document.getElementById(`fecha-${opId}`)?.value || '';
+      return { id: opId, fechaInicio: fi };
+    });
 
   if (!cliente) return toast('El nombre del cliente es obligatorio', 'warn');
   if (diasSelServ.length === 0) return toast('Seleccioná al menos un día', 'warn');
@@ -1940,7 +1973,7 @@ async function guardarServicio(id = '') {
     radioGps,
     dias: diasSelServ,
     horariosPorDia: JSON.stringify(horariosPorDia),
-    operarios: operariosSelec,
+    operarios: operariosSelec, // [{id, fechaInicio}]
     tipo: 'FIJO',
     lat: '', lon: ''
   };
@@ -1962,6 +1995,17 @@ async function guardarServicio(id = '') {
   renderServicios();
 }
 
+function toggleFechaInicioOp(opId) {
+  const chk = document.getElementById(`chk-${opId}`);
+  const row = document.getElementById(`fecha-row-${opId}`);
+  if (!row) return;
+  row.style.display = chk?.checked ? 'flex' : 'none';
+  if (!chk?.checked) {
+    const fi = document.getElementById(`fecha-${opId}`);
+    if (fi) fi.value = '';
+  }
+}
+
 function filtrarOpsModal() {
   const q = (document.getElementById('sv-op-buscar')?.value || '').toLowerCase();
   document.querySelectorAll('[id^="op-row-"]').forEach(row => {
@@ -1973,7 +2017,38 @@ function filtrarOpsModal() {
 async function verServicio(id) {
   const s = await fsGet('horas_servicios', id);
   if (!s) return toast('No se pudo cargar el servicio', 'error');
-  const ops = (Array.isArray(s.operarios)?s.operarios:[]).map(oid => _operariosCache.find(o=>o._id===oid)?.nombre||oid).filter(Boolean);
+
+  // Normalizar operarios retrocompatible
+  const opsRaw = Array.isArray(s.operarios) ? s.operarios : [];
+  const opsNorm = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
+
+  // Cargar coberturas activas si el cache está vacío
+  let coberturas = _coberturasCache;
+  if (!coberturas.length) {
+    try { coberturas = await fsList('horas_coberturas'); } catch {}
+  }
+  const hoy = isoHoy();
+  // Coberturas de tipo AUSENCIA activas en este servicio hoy
+  const cobActivas = coberturas.filter(c =>
+    c.tipoCob === 'AUSENCIA' &&
+    c.estado === 'ACTIVA' &&
+    c.fechaInicio <= hoy &&
+    (!c.fechaFin || c.fechaFin >= hoy) &&
+    normOps(s.operarios).includes(c.ausenteId)
+  );
+
+  // Build mapa ausenteId → reemplazante
+  const reemplazos = {}; // ausenteId -> { nombre, fechaInicio, fechaFin }
+  cobActivas.forEach(c => {
+    if (c.ausenteId) reemplazos[c.ausenteId] = {
+      nombre: c.reemplazanteNombre || '—',
+      fechaInicio: c.fechaInicio || '',
+      fechaFin: c.fechaFin || ''
+    };
+  });
+
+  // ops sigue siendo array de nombres para compatibilidad interna — pero ahora usamos opsNorm
+  const ops = opsNorm.map(o => _operariosCache.find(op=>op._id===o.id)?.nombre||o.id).filter(Boolean);
   // Horarios por día
   let horarios = {};
   try { if(s.horariosPorDia) horarios = typeof s.horariosPorDia==='string'?JSON.parse(s.horariosPorDia):s.horariosPorDia; } catch{}
@@ -2023,10 +2098,26 @@ async function verServicio(id) {
         </div>
 
         <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">
-          Operarios asignados (${ops.length})
+          Operarios asignados (${opsNorm.length})
         </div>
-        ${ops.length===0?'<div style="font-size:13px;color:var(--text3);font-style:italic;margin-bottom:14px">Sin asignar</div>':
-          ops.map(n=>`<div style="font-size:13px;color:var(--accent);padding:5px 0;border-bottom:1px solid var(--border)">👷 ${n}</div>`).join('')}
+        ${opsNorm.length===0?'<div style="font-size:13px;color:var(--text3);font-style:italic;margin-bottom:14px">Sin asignar</div>':          opsNorm.map(o=>{
+            const nombre = _operariosCache.find(op=>op._id===o.id)?.nombre || o.id;
+            const rep = reemplazos[o.id];
+            const fechaStr = o.fechaInicio
+              ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">desde ${formatFecha(o.fechaInicio)}</span>`
+              : `<span style="font-size:10px;color:var(--text3);margin-left:6px;font-style:italic">sin fecha reg.</span>`;
+            const repDiv = rep
+              ? `<div style="font-size:11px;padding:4px 8px;margin-top:3px;background:rgba(224,123,42,.1);border-radius:6px;border-left:3px solid var(--yellow)">⚠ De licencia → reemplaza: <strong>${rep.nombre}</strong>${rep.fechaFin?' · hasta '+formatFecha(rep.fechaFin):''}</div>`
+              : '';
+            return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:3px">
+                <span style="font-size:13px;color:${rep?'var(--text3)':'var(--accent)'}">👷 ${nombre}</span>
+                ${fechaStr}
+                ${rep?'<span style="font-size:10px;padding:1px 6px;background:var(--yellow);color:#fff;border-radius:8px;margin-left:4px">AUSENTE</span>':''}
+              </div>
+              ${repDiv}
+            </div>`;
+          }).join('')}
 
         <div class="modal-actions" style="margin-top:14px">
           <button class="btn-secondary" onclick="cerrarModal()">CERRAR</button>
@@ -2487,7 +2578,7 @@ function esMiServicio(s) {
 function esMiOperario(o, misServicios) {
   // Un operario es "mío" si está asignado a alguno de mis servicios
   return misServicios.some(s =>
-    (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id)
+    normOps(s.operarios).includes(o._id)
   );
 }
 
@@ -2511,7 +2602,7 @@ async function renderSupDashboard() {
   const diaHoy = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'][new Date().getDay()];
   const debianHoy = misOps.filter(o =>
     misServicios.some(s =>
-      (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id) &&
+      normOps(s.operarios).includes(o._id) &&
       (s.dias||[]).includes(diaHoy)
     )
   );
@@ -2586,7 +2677,7 @@ async function renderSupFichadas() {
   const diaHoy = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'][new Date().getDay()];
   const opsHoy = [...misOpsIds].map(id => operarios.find(o=>o._id===id)).filter(o =>
     o && misServicios.some(s =>
-      (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id) &&
+      normOps(s.operarios).includes(o._id) &&
       (s.dias||[]).includes(diaHoy)
     )
   );
@@ -2658,7 +2749,7 @@ async function renderSupOperarios() {
     <div id="sup-op-lista"></div>`;
 
   window._supOps = misOps.map(o => {
-    const srvs = misServicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
+    const srvs = misServicios.filter(s => normOps(s.operarios).includes(o._id));
     return { o, srvs };
   });
   filtrarSupOps();
@@ -2714,9 +2805,9 @@ async function renderSupServicios() {
     const diasKey = (s.dias||[]).slice().sort().join('-');
     const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
     if (!grupos[clave]) {
-      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...(Array.isArray(s.operarios)?s.operarios:[])] };
+      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...normOps(s.operarios)] };
     } else {
-      for (const op of (Array.isArray(s.operarios)?s.operarios:[])) {
+      for (const op of normOps(s.operarios)) {
         if (!grupos[clave]._operariosAll.includes(op)) grupos[clave]._operariosAll.push(op);
       }
       grupos[clave]._ids.push(s._id);
@@ -3442,7 +3533,7 @@ async function cargarServiciosAusente() {
 
   // Servicios donde el ausente está asignado
   const misServicios = servicios.filter(s =>
-    (Array.isArray(s.operarios)?s.operarios:[]).includes(ausenteId)
+    normOps(s.operarios).includes(ausenteId)
   );
 
   const bloque = document.getElementById('aus-servicios-bloque');
@@ -3503,7 +3594,7 @@ async function guardarAusencia() {
 
   const servicios = window._aus_servicios || [];
   const misServicios = servicios.filter(s =>
-    (Array.isArray(s.operarios)?s.operarios:[]).includes(ausenteId)
+    normOps(s.operarios).includes(ausenteId)
   );
 
   let guardados = 0;
@@ -4188,7 +4279,7 @@ async function renderReporteBancoHoras() {
   // Horas fijas por operario desde servicios asignados
   const horasFijasMes = {};
   for (const s of servicios) {
-    const opsS = Array.isArray(s.operarios) ? s.operarios : [];
+    const opsS = normOps(s.operarios);
     const hsSemanales = Number(s.horasPorSemana) || (Number(s.horasContratadas)||0) * (s.dias?.length||0);
     const hsMensuales = hsSemanales * 4;
     for (const opId of opsS) {
@@ -4683,7 +4774,7 @@ async function renderReporteOperario() {
     <div id="rp-op-lista"></div>`;
 
   window._rpOps = operarios.filter(o => o.rol === 'OPERARIO').map(o => {
-    const srvs = servicios.filter(s => (Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
+    const srvs = servicios.filter(s => normOps(s.operarios).includes(o._id));
     const hsRecibo = Number(o.horasRecibo) || 0;
     const fichadasOp = fichadasMes.filter(f=>f.operarioId===o._id);
     const hsReales = fichadasOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
@@ -4928,7 +5019,7 @@ async function renderReporteServicios() {
     <div id="rp-srv-lista"></div>`;
 
   window._rpSrvs = servicios.map(s => {
-    const ops = (Array.isArray(s.operarios)?s.operarios:[]).map(id=>operarios.find(o=>o._id===id)).filter(Boolean);
+    const ops = normOps(s.operarios).map(id=>operarios.find(o=>o._id===id)).filter(Boolean);
     const hsTotalesMes = (s.horasContratadas||0) * (s.dias?.length||0) * 4;
     return { s, ops, hsTotalesMes };
   }).sort((a,b)=>(a.s.cliente||'').localeCompare(b.s.cliente||''));
@@ -5003,7 +5094,7 @@ async function renderReporteMensual() {
 
   const rows = ops.map(o => {
     const recibo = Number(o.horasRecibo)||0;
-    const srvs = servicios.filter(s=>(Array.isArray(s.operarios)?s.operarios:[]).includes(o._id));
+    const srvs = servicios.filter(s=>normOps(s.operarios).includes(o._id));
     const fichOp = fichadasMes.filter(f=>f.operarioId===o._id);
     const hsFichadas = fichOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
     const hsFeriado = fichOp.filter(f=>f.esFeriado).reduce((s,f)=>s+(f.horasTrabajadas||0),0);
@@ -5106,7 +5197,7 @@ async function renderAgenda() {
 
   // ── SERVICIOS FIJOS ASIGNADOS ──
   const misServicios = servicios.filter(s => {
-    const ops = Array.isArray(s.operarios) ? s.operarios : [];
+    const ops = normOps(s.operarios);
     return ops.includes(currentUser._id);
   });
 
