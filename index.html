@@ -799,13 +799,22 @@ function fechaHoy() {
 }
 // Helper retrocompatible: devuelve array de IDs sin importar si operarios es [string] o [{id,...}]
 function normOps(operarios) {
-  if (!Array.isArray(operarios)) return [];
-  return operarios.map(o => (typeof o === 'string' ? o : o?.id)).filter(Boolean);
+  // Puede llegar como JSON string, array de strings, o array de objetos {id, fechaInicio}
+  let arr = operarios;
+  if (typeof operarios === 'string') {
+    try { arr = JSON.parse(operarios); } catch { return []; }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr.map(o => (typeof o === 'string' ? o : o?.id)).filter(Boolean);
 }
 // Helper: obtiene fechaInicio de un operario en un servicio
 function fechaInicioOp(operarios, opId) {
-  if (!Array.isArray(operarios)) return '';
-  const o = operarios.find(x => (typeof x === 'string' ? x : x?.id) === opId);
+  let arr = operarios;
+  if (typeof operarios === 'string') {
+    try { arr = JSON.parse(operarios); } catch { return ''; }
+  }
+  if (!Array.isArray(arr)) return '';
+  const o = arr.find(x => (typeof x === 'string' ? x : x?.id) === opId);
   return (typeof o === 'object' && o?.fechaInicio) ? o.fechaInicio : '';
 }
 
@@ -1652,8 +1661,10 @@ async function modalServicio(id = null) {
   }
 
   const esEdicion = !!id;
-  // Soporte retrocompatible: operarios puede ser [string] o [{id, fechaInicio}]
-  const opsRaw = Array.isArray(s.operarios) ? s.operarios : (s.operarios ? [s.operarios] : []);
+  // Soporte retrocompatible: operarios puede ser JSON string, [string] o [{id, fechaInicio}]
+  let opsRaw = s.operarios;
+  if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
+  if (!Array.isArray(opsRaw)) opsRaw = [];
   // Normalizar a objetos {id, fechaInicio}
   const opsObjs = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
   const opsIds = opsObjs.map(o => o.id);
@@ -1974,7 +1985,7 @@ async function guardarServicio(id = '') {
     radioGps,
     dias: diasSelServ,
     horariosPorDia: JSON.stringify(horariosPorDia),
-    operarios: operariosSelec, // [{id, fechaInicio}]
+    operarios: JSON.stringify(operariosSelec), // serializado para Firestore
     tipo: 'FIJO',
     lat: '', lon: ''
   };
@@ -2019,8 +2030,10 @@ async function verServicio(id) {
   const s = await fsGet('horas_servicios', id);
   if (!s) return toast('No se pudo cargar el servicio', 'error');
 
-  // Normalizar operarios retrocompatible
-  const opsRaw = Array.isArray(s.operarios) ? s.operarios : [];
+  // Normalizar operarios retrocompatible (puede ser JSON string, [string] o [{id,fechaInicio}])
+  let opsRaw = s.operarios;
+  if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
+  if (!Array.isArray(opsRaw)) opsRaw = [];
   const opsNorm = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
 
   // Cargar coberturas activas si el cache está vacío
