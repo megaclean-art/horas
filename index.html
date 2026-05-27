@@ -4453,6 +4453,9 @@ async function renderReporteBancoHoras() {
   const licenciaCount = rows.filter(r => r.licInfo).length;
   const nosDebenTotal = rows.filter(r => r.diff < 0 && !r.licInfo).reduce((s, r) => s + Math.abs(r.diff), 0);
   const debemosTotal = rows.filter(r => r.diff > 0 && !r.licInfo).reduce((s, r) => s + r.diff, 0);
+  const reciboTotalOps = rows.reduce((s, r) => s + r.recibo, 0);
+  const idxNoDeben = reciboTotalOps > 0 ? (nosDebenTotal / reciboTotalOps * 100) : 0;
+  const idxDebemos = reciboTotalOps > 0 ? (debemosTotal / reciboTotalOps * 100) : 0;
 
   const [y, m] = mesActual.split('-');
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -4480,6 +4483,25 @@ async function renderReporteBancoHoras() {
       <div class="stat-card" style="border-color:rgba(26,143,203,.3);cursor:pointer;background:rgba(26,143,203,.04)" onclick="document.getElementById('rp-filtro').value='licencia';filtrarBanco()">
         <div class="stat-num" style="color:var(--accent)">${licenciaCount}</div>
         <div class="stat-label">🏥 En licencia</div>
+      </div>
+    </div>
+
+    <!-- Índice de eficiencia operativa -->
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:10px">
+        📊 Índice de eficiencia · Solo operarios · Base: ${reciboTotalOps.toFixed(0)}h recibo total
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="background:var(--red-light);border:1px solid rgba(214,61,74,.2);border-radius:8px;padding:10px 12px">
+          <div style="font-size:22px;font-weight:700;color:var(--red);font-family:var(--font-display)">${idxNoDeben.toFixed(1)}%</div>
+          <div style="font-size:11px;color:var(--red);font-weight:600">Horas pagas no trabajadas</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">${nosDebenTotal.toFixed(1)}h / ${reciboTotalOps.toFixed(0)}h</div>
+        </div>
+        <div style="background:var(--green-light);border:1px solid rgba(39,168,90,.2);border-radius:8px;padding:10px 12px">
+          <div style="font-size:22px;font-weight:700;color:var(--green);font-family:var(--font-display)">${idxDebemos.toFixed(1)}%</div>
+          <div style="font-size:11px;color:var(--green);font-weight:600">Horas trabajadas sin pagar</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">${debemosTotal.toFixed(1)}h / ${reciboTotalOps.toFixed(0)}h</div>
+        </div>
       </div>
     </div>
 
