@@ -1593,7 +1593,9 @@ function filtrarServicios() {
     const diasKey = (s.dias||[]).slice().sort().join('-');
     const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
     if (!grupos[clave]) {
-      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...normOps(s.operarios)] };
+      const _dbgOps = normOps(s.operarios);
+      console.log('[DEBUG srv]', s.cliente, '| operarios raw:', s.operarios, '| normOps:', _dbgOps);
+      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [..._dbgOps] };
     } else {
       // Agregar operarios del duplicado al grupo
       const opsNuevos = normOps(s.operarios);
