@@ -4451,6 +4451,8 @@ async function renderReporteBancoHoras() {
   const debemosCount = rows.filter(r => r.diff > 0 && !r.licInfo).length;
   const equilibrio = rows.filter(r => r.diff === 0 && !r.licInfo).length;
   const licenciaCount = rows.filter(r => r.licInfo).length;
+  const nosDebenTotal = rows.filter(r => r.diff < 0 && !r.licInfo).reduce((s, r) => s + Math.abs(r.diff), 0);
+  const debemosTotal = rows.filter(r => r.diff > 0 && !r.licInfo).reduce((s, r) => s + r.diff, 0);
 
   const [y, m] = mesActual.split('-');
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -4464,10 +4466,12 @@ async function renderReporteBancoHoras() {
       <div class="stat-card" style="border-color:rgba(214,61,74,.3);cursor:pointer" onclick="document.getElementById('rp-filtro').value='deben';filtrarBanco()">
         <div class="stat-num" style="color:var(--red)">${nosDebenCount}</div>
         <div class="stat-label">Nos deben</div>
+        <div style="font-size:11px;color:var(--red);font-weight:600;margin-top:2px">${nosDebenTotal.toFixed(1)}h total</div>
       </div>
       <div class="stat-card" style="border-color:rgba(39,168,90,.3);cursor:pointer" onclick="document.getElementById('rp-filtro').value='debemos';filtrarBanco()">
         <div class="stat-num" style="color:var(--green)">${debemosCount}</div>
         <div class="stat-label">Les debemos</div>
+        <div style="font-size:11px;color:var(--green);font-weight:600;margin-top:2px">${debemosTotal.toFixed(1)}h total</div>
       </div>
       <div class="stat-card" style="cursor:pointer" onclick="document.getElementById('rp-filtro').value='ok';filtrarBanco()">
         <div class="stat-num">${equilibrio}</div>
