@@ -1933,7 +1933,8 @@ async function guardarServicio(id = '') {
   const adminCliente = document.getElementById('sv-admin')?.value.trim() || '';
   const radioGps = Number(document.getElementById('sv-radio').value) || 300;
   // Guardar operarios como [{id, fechaInicio}] para trazabilidad
-  const operariosSelec = Array.from(document.querySelectorAll('[id^="chk-"]'))
+  // Usar el contenedor específico para evitar capturar checkboxes de otras secciones
+  const operariosSelec = Array.from(document.querySelectorAll('#sv-ops-lista [id^="chk-"]'))
     .filter(c => c.checked)
     .map(c => {
       const opId = c.id.replace('chk-', '');
