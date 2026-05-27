@@ -422,6 +422,18 @@ function toFS(data) {
       fields[k] = { arrayValue: { values: v.map(i => {
         if (typeof i === 'string') return { stringValue: i };
         if (typeof i === 'number') return { integerValue: String(i) };
+        if (typeof i === 'boolean') return { booleanValue: i };
+        if (i && typeof i === 'object') {
+          // Serializar objeto como mapValue
+          const mapFields = {};
+          for (const [mk, mv] of Object.entries(i)) {
+            if (mv === null || mv === undefined) mapFields[mk] = { nullValue: null };
+            else if (typeof mv === 'boolean') mapFields[mk] = { booleanValue: mv };
+            else if (typeof mv === 'number') mapFields[mk] = Number.isInteger(mv) ? { integerValue: String(mv) } : { doubleValue: mv };
+            else mapFields[mk] = { stringValue: String(mv) };
+          }
+          return { mapValue: { fields: mapFields } };
+        }
         return { stringValue: String(i) };
       })}};
     }
@@ -439,7 +451,25 @@ function fromFS(doc) {
     else if (v.doubleValue !== undefined) out[k] = v.doubleValue;
     else if (v.booleanValue !== undefined) out[k] = v.booleanValue;
     else if (v.nullValue !== undefined) out[k] = null;
-    else if (v.arrayValue) out[k] = (v.arrayValue.values || []).map(i => i.stringValue ?? i.integerValue ?? i.booleanValue);
+    else if (v.arrayValue) out[k] = (v.arrayValue.values || []).map(i => {
+      if (i.stringValue !== undefined) return i.stringValue;
+      if (i.integerValue !== undefined) return Number(i.integerValue);
+      if (i.doubleValue !== undefined) return i.doubleValue;
+      if (i.booleanValue !== undefined) return i.booleanValue;
+      if (i.mapValue?.fields) {
+        // Deserializar objeto desde mapValue
+        const obj = {};
+        for (const [mk, mv] of Object.entries(i.mapValue.fields)) {
+          if (mv.stringValue !== undefined) obj[mk] = mv.stringValue;
+          else if (mv.integerValue !== undefined) obj[mk] = Number(mv.integerValue);
+          else if (mv.doubleValue !== undefined) obj[mk] = mv.doubleValue;
+          else if (mv.booleanValue !== undefined) obj[mk] = mv.booleanValue;
+          else obj[mk] = null;
+        }
+        return obj;
+      }
+      return null;
+    }).filter(i => i !== null && i !== undefined);
     else out[k] = null;
   }
   out._id = doc.name?.split('/').pop();
@@ -1593,9 +1623,7 @@ function filtrarServicios() {
     const diasKey = (s.dias||[]).slice().sort().join('-');
     const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
     if (!grupos[clave]) {
-      const _dbgOps = normOps(s.operarios);
-      console.log('[DEBUG srv]', s.cliente, '| operarios raw:', s.operarios, '| normOps:', _dbgOps);
-      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [..._dbgOps] };
+      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...normOps(s.operarios)] };
     } else {
       // Agregar operarios del duplicado al grupo
       const opsNuevos = normOps(s.operarios);
@@ -1987,7 +2015,7 @@ async function guardarServicio(id = '') {
     radioGps,
     dias: diasSelServ,
     horariosPorDia: JSON.stringify(horariosPorDia),
-    operarios: JSON.stringify(operariosSelec), // serializado para Firestore
+    operarios: operariosSelec, // [{id, fechaInicio}]
     tipo: 'FIJO',
     lat: '', lon: ''
   };
