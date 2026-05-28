@@ -762,7 +762,7 @@ function iniciarApp() {
   document.getElementById('topbar-name').textContent = currentUser.nombre;
   document.getElementById('topbar-role').textContent = currentUser.rol;
   renderTabs();
-  navigateTo(currentUser.rol === 'OPERARIO' ? 'fichar' : currentUser.rol === 'SUPERVISOR' ? 'sup-dashboard' : 'dashboard');
+  navigateTo(currentUser.rol === 'OPERARIO' ? 'fichar' : currentUser.rol === 'SUPERVISOR' ? 'sup-dashboard' : currentUser.rol === 'LOGISTICA' ? 'logistica' : 'dashboard');
   // Prefetch en background: carga colecciones principales una sola vez al login
   prefetchColecciones();
 }
@@ -779,6 +779,7 @@ const TABS = {
     { id: 'feriados', icon: '📅', label: 'Feriados' },
     { id: 'reportes', icon: '📈', label: 'Reportes' },
     { id: 'fichadas', icon: '📋', label: 'Fichadas' },
+    { id: 'logistica', icon: '🚚', label: 'Logística' },
   ],
   SUPERVISOR: [
     { id: 'sup-dashboard', icon: '📊', label: 'Dashboard' },
@@ -793,6 +794,9 @@ const TABS = {
     { id: 'fichar', icon: '📍', label: 'Fichar' },
     { id: 'agenda', icon: '📆', label: 'Mi Agenda' },
     { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
+  ],
+  LOGISTICA: [
+    { id: 'logistica', icon: '🚚', label: 'Logística' },
   ]
 };
 
@@ -812,7 +816,7 @@ function navigateTo(id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   const tab = document.getElementById('tab-' + id);
   if (tab) tab.classList.add('active');
-  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, agenda: renderAgenda, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, 'sup-dashboard': renderSupDashboard, 'sup-fichadas': renderSupFichadas, 'sup-operarios': renderSupOperarios, 'sup-servicios': renderSupServicios, coberturas: renderCoberturas, feriados: renderFeriados, reportes: renderReportes };
+  const screens = { fichar: renderFichar, 'mis-horas': renderMisHoras, agenda: renderAgenda, dashboard: renderDashboard, operarios: renderOperarios, servicios: renderServicios, fichadas: renderFichadasAdmin, supervisor: renderSupervisor, 'sup-dashboard': renderSupDashboard, 'sup-fichadas': renderSupFichadas, 'sup-operarios': renderSupOperarios, 'sup-servicios': renderSupServicios, coberturas: renderCoberturas, feriados: renderFeriados, reportes: renderReportes, logistica: renderLogistica };
   if (screens[id]) screens[id]();
 }
 
@@ -1359,7 +1363,7 @@ function filtrarOperarios() {
             <div class="list-item-name">${o.nombre||'—'}</div>
             <div class="list-item-sub">
               DNI: ${o.dni||'<em style="color:var(--text3)">Sin cargar</em>'}
-              &nbsp;·&nbsp; <span class="pill ${o.rol==='ADMIN'?'pill-blue':o.rol==='SUPERVISOR'?'pill-yellow':'pill-gray'}">${o.rol||'OPERARIO'}</span>
+              &nbsp;·&nbsp; <span class="pill ${o.rol==='ADMIN'?'pill-blue':o.rol==='SUPERVISOR'?'pill-yellow':o.rol==='LOGISTICA'?'pill-green':'pill-gray'}">${o.rol||'OPERARIO'}</span>
               &nbsp;·&nbsp; ${o.tipo==='FIJO'?`Fijo ${o.horasSemana||0}hs/sem`:'Variable'}
               ${o.barrio ? `&nbsp;·&nbsp; 📍 ${o.barrio}` : ''}
               ${!o.password || !o.dni ? '&nbsp;·&nbsp; <span style="color:var(--yellow)">⚠ Incompleto</span>' : ''}
@@ -1461,6 +1465,7 @@ async function modalOperario(id = null) {
               <option value="OPERARIO" ${(o.rol||'OPERARIO')==='OPERARIO'?'selected':''}>Operario</option>
               <option value="SUPERVISOR" ${o.rol==='SUPERVISOR'?'selected':''}>Supervisor</option>
               <option value="ADMIN" ${o.rol==='ADMIN'?'selected':''}>Admin</option>
+              <option value="LOGISTICA" ${o.rol==='LOGISTICA'?'selected':''}>Logística</option>
             </select>
           </div>
           <div class="field-sm"><label>Tipo liquidación</label>
@@ -5557,6 +5562,199 @@ async function renderReporteAusentismo() {
 
   // Exponer la función al scope global para el onchange del select
   window.renderTablaAusentismo = renderTabla;
+}
+
+// ════════════════════════════════════════════
+//  MÓDULO: LOGÍSTICA
+// ════════════════════════════════════════════
+
+const ZONAS_LOGISTICA = ['CENTRO','NUEVA CORDOBA','GENERAL PAZ','ALTA CORDOBA','NORTE','OESTE','SUR','INTER FABRICA - ESTE','VILLA ALLENDE','CARLOS PAZ','INTERNA','SIN INSUMOS'];
+
+async function renderLogistica() {
+  const sc = document.getElementById('main-content');
+  sc.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3)">Cargando...</div>`;
+
+  const [servicios, entregas] = await Promise.all([
+    fsList('horas_servicios'),
+    fsList('horas_entregas'),
+  ]);
+
+  const mes = new Date().toISOString().slice(0, 7); // "2026-05"
+  const entregasMap = {}; // servicioId -> entrega doc
+  entregas.filter(e => e.mes === mes).forEach(e => { entregasMap[e.servicioId] = e; });
+
+  renderLogisticaVista(servicios, entregasMap, mes, 'TODAS');
+}
+
+function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
+  const sc = document.getElementById('main-content');
+  const esAdmin = currentUser.rol === 'ADMIN';
+
+  // Separar sin insumos vs con insumos
+  const conInsumos  = servicios.filter(s => s.zona !== 'SIN INSUMOS' && s.zona !== 'INTERNA' && s.zona);
+  const sinInsumos  = servicios.filter(s => s.zona === 'SIN INSUMOS');
+  const sinZona     = servicios.filter(s => !s.zona);
+
+  // Deduplicar por nombre (mismo servicio puede tener varios docs por operario)
+  function dedup(lista) {
+    const seen = new Set();
+    return lista.filter(s => {
+      const k = s.cliente?.trim().toUpperCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  const conInsumosDed = dedup(conInsumos);
+  const sinInsumosDed = dedup(sinInsumos);
+
+  // Filtrar por zona
+  const lista = zonaFiltro === 'TODAS'
+    ? conInsumosDed
+    : conInsumosDed.filter(s => s.zona === zonaFiltro);
+
+  // Estadísticas solo sobre con insumos deduplicados
+  const totalConInsumos = conInsumosDed.length;
+  const entregados = conInsumosDed.filter(s => entregasMap[s._id]).length;
+  const pendientes = totalConInsumos - entregados;
+  const pct = totalConInsumos > 0 ? Math.round(entregados / totalConInsumos * 100) : 0;
+
+  // Estadísticas por zona filtrada
+  const totalZona = lista.length;
+  const entregadosZona = lista.filter(s => entregasMap[s._id]).length;
+
+  const mesLabel = new Date(mes + '-02').toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+
+  sc.innerHTML = `
+    <div style="padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <span style="font-size:22px">🚚</span>
+        <span style="font-family:var(--font-display);font-size:20px;font-weight:800;letter-spacing:1px;text-transform:uppercase">Logística</span>
+      </div>
+      <div style="color:var(--text3);font-size:13px;margin-bottom:16px;text-transform:capitalize">${mesLabel}</div>
+
+      <!-- Stats globales -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:26px;font-weight:800;color:var(--green);font-family:var(--font-display)">${entregados}</div>
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Entregados</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:26px;font-weight:800;color:var(--red);font-family:var(--font-display)">${pendientes}</div>
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Pendientes</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:26px;font-weight:800;color:var(--accent);font-family:var(--font-display)">${pct}%</div>
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Progreso</div>
+        </div>
+      </div>
+
+      <!-- Barra de progreso global -->
+      <div style="background:var(--border);border-radius:6px;height:10px;margin-bottom:16px;overflow:hidden">
+        <div style="background:var(--green);height:100%;width:${pct}%;border-radius:6px;transition:width .4s"></div>
+      </div>
+
+      <!-- Filtro zona -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <select id="log-zona-sel" onchange="logisticaCambiarZona()" style="flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;outline:none">
+          <option value="TODAS" ${zonaFiltro==='TODAS'?'selected':''}>Todas las zonas (${totalConInsumos})</option>
+          ${ZONAS_LOGISTICA.filter(z=>z!=='SIN INSUMOS'&&z!=='INTERNA').map(z=>{
+            const cnt = conInsumosDed.filter(s=>s.zona===z).length;
+            const ent = conInsumosDed.filter(s=>s.zona===z&&entregasMap[s._id]).length;
+            return cnt > 0 ? `<option value="${z}" ${zonaFiltro===z?'selected':''}>${z} (${ent}/${cnt})</option>` : '';
+          }).join('')}
+        </select>
+        ${zonaFiltro!=='TODAS'?`<div style="font-size:12px;color:var(--text3);white-space:nowrap">${entregadosZona}/${totalZona} en esta zona</div>`:''}
+      </div>
+
+      <!-- Lista servicios con insumos -->
+      <div id="log-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:20px">
+        ${lista.sort((a,b)=>{
+          const ae = entregasMap[a._id] ? 1 : 0;
+          const be = entregasMap[b._id] ? 1 : 0;
+          return ae - be || (a.cliente||'').localeCompare(b.cliente||'');
+        }).map(s => {
+          const ent = entregasMap[s._id];
+          return `
+          <div style="background:var(--surface);border:1px solid ${ent?'rgba(39,168,90,.3)':'var(--border)'};border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;opacity:${ent?'.75':'1'}">
+            <div onclick="logisticaToggle('${s._id}','${(s.cliente||'').replace(/'/g,"\\'")}','${mes}')"
+              style="width:28px;height:28px;border-radius:50%;border:2px solid ${ent?'var(--green)':'var(--border)'};background:${ent?'var(--green)':'transparent'};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .2s">
+              ${ent?'<span style="color:#fff;font-size:14px">✓</span>':''}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600;${ent?'text-decoration:line-through;color:var(--text3)':''}">${s.cliente||'—'}</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:2px">${s.zona||''}${s.direccion?' · '+s.direccion:''}</div>
+              ${ent?`<div style="font-size:11px;color:var(--green);margin-top:2px">✓ Entregado ${ent.fecha||''}</div>`:''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <!-- Sección SIN INSUMOS colapsable -->
+      ${sinInsumosDed.length > 0 ? `
+      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px">
+        <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'"
+          style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:var(--surface)">
+          <span style="font-size:13px;font-weight:700;color:var(--text3)">⚪ SIN INSUMOS (${sinInsumosDed.length})</span>
+          <span style="font-size:11px;color:var(--text3)">▼ ver listado</span>
+        </div>
+        <div style="display:none;padding:8px 0">
+          ${sinInsumosDed.map(s=>`
+            <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center">
+              <span style="font-size:16px">⊘</span>
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--text3)">${s.cliente||'—'}</div>
+                ${s.direccion?`<div style="font-size:11px;color:var(--text3)">${s.direccion}</div>`:''}
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+      <!-- Sin zona asignada (solo admin) -->
+      ${esAdmin && sinZona.length > 0 ? `
+      <div style="background:rgba(224,123,42,.08);border:1px solid rgba(224,123,42,.3);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--yellow);margin-bottom:6px">⚠️ ${sinZona.length} servicios sin zona asignada</div>
+        ${sinZona.slice(0,5).map(s=>`<div style="font-size:12px;color:var(--text3);padding:2px 0">${s.cliente||s._id}</div>`).join('')}
+        ${sinZona.length>5?`<div style="font-size:11px;color:var(--text3);margin-top:4px">...y ${sinZona.length-5} más. Asignalos desde ABM Servicios.</div>`:''}
+      </div>` : ''}
+
+    </div>`;
+
+  // Guardar estado para re-render tras toggle
+  window._logState = { servicios, entregasMap, mes, zonaFiltro };
+}
+
+function logisticaCambiarZona() {
+  const zona = document.getElementById('log-zona-sel').value;
+  const { servicios, entregasMap, mes } = window._logState;
+  renderLogisticaVista(servicios, entregasMap, mes, zona);
+}
+
+async function logisticaToggle(servicioId, nombreServicio, mes) {
+  const { servicios, entregasMap } = window._logState;
+  const yaEntregado = !!entregasMap[servicioId];
+
+  if (yaEntregado) {
+    // Desmarcar — borrar el doc
+    const docId = entregasMap[servicioId]._id;
+    await fsDelete('horas_entregas', docId);
+    delete entregasMap[servicioId];
+    toast(`↩ ${nombreServicio} desmarcado`, 'warn');
+  } else {
+    // Marcar como entregado
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const data = { servicioId, mes, fecha, entregado: true, nombre: nombreServicio };
+    const newId = await fsAdd('horas_entregas', data);
+    if (newId) {
+      entregasMap[servicioId] = { _id: newId, servicioId, mes, fecha, entregado: true, nombre: nombreServicio };
+      toast(`✓ ${nombreServicio} entregado`, 'ok');
+    }
+  }
+
+  invalidarCache('horas_entregas');
+  const { zonaFiltro } = window._logState;
+  renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro);
 }
 
 // ════════════════════════════════════════════
