@@ -990,21 +990,25 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
   const enCurso = tieneEntrada && !tieneSalida;
 
   // Verificar si está bloqueado por horas extra
-  const bloqueado = fichada?.bloqueadoHorasExtra;
+  const bloqueado = false; // Ya no se bloquea salida — se registra desvío como alerta
 
   let fichadaHtml = '';
   if (fichada) {
+    const desvioF = fichada.desvioHoras;
+    const desvioStr = (desvioF !== undefined && desvioF !== 0)
+      ? ` <span style="color:${desvioF > 0 ? 'var(--yellow)' : 'var(--red)'};font-size:11px;font-weight:700">(${desvioF > 0 ? '+' : ''}${desvioF.toFixed(1)}hs desvío)</span>`
+      : '';
     fichadaHtml = `<div class="fichada-info">
       ${tieneEntrada ? `<div class="fichada-row"><span>Entrada:</span><span class="val">${fichada.entrada}</span></div>` : ''}
-      ${tieneSalida ? `<div class="fichada-row"><span>Salida:</span><span class="val">${fichada.salida}</span></div>` : ''}
+      ${tieneSalida ? `<div class="fichada-row"><span>Salida:</span><span class="val">${fichada.salida}${desvioStr}</span></div>` : ''}
       ${tieneSalida ? `<div class="fichada-row"><span>Horas trabajadas:</span><span class="val">${diffHoras(fichada.entrada, fichada.salida).toFixed(1)}hs</span></div>` : ''}
       <div class="fichada-row"><span>GPS entrada:</span><span class="val ${fichada.gpsOk ? 'gps-ok' : 'gps-warn'}">${fichada.gpsOk ? '✓ OK' : '⚠ Fuera de rango'} ${fichada.distanciaEntrada ? Math.round(fichada.distanciaEntrada)+'m' : ''}</span></div>
-      ${bloqueado ? `<div style="background:rgba(230,57,70,.1);border:1px solid rgba(230,57,70,.3);border-radius:6px;padding:8px;margin-top:6px;font-size:12px;color:var(--red)">⛔ Salida bloqueada — superás las horas contratadas. Aguardá autorización del supervisor.</div>` : ''}
+      ${fichada.alertaDesvio ? `<div style="background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.35);border-radius:6px;padding:8px;margin-top:6px;font-size:12px;color:var(--yellow)">⚠ Desvío de horario registrado — el supervisor fue notificado.</div>` : ''}
     </div>`;
   }
 
-  let estado = tieneSalida ? `<span class="pill pill-green">✓ Completado</span>`
-    : bloqueado ? `<span class="pill pill-red">⛔ Bloqueado</span>`
+  let estado = tieneSalida
+    ? (fichada?.alertaDesvio ? `<span class="pill pill-yellow">⚠ Desvío</span>` : `<span class="pill pill-green">✓ Completado</span>`)
     : enCurso ? `<span class="pill pill-yellow">En curso</span>`
     : `<span class="pill pill-gray">Pendiente</span>`;
 
@@ -1024,8 +1028,8 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
       <button class="btn-entrar" ${tieneEntrada ? 'disabled' : ''} onclick="ficharEntradaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}')">
         ${tieneEntrada ? '✓ Entrada marcada' : '▶ ENTRAR'}
       </button>
-      <button class="btn-salir" ${!tieneEntrada || tieneSalida || bloqueado ? 'disabled' : ''} onclick="ficharSalidaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}',${s.horasContratadas||0},${s._horasExtra||0})">
-        ${tieneSalida ? '✓ Salida marcada' : bloqueado ? '⛔ Bloqueado' : '■ SALIR'}
+      <button class="btn-salir" ${!tieneEntrada || tieneSalida ? 'disabled' : ''} onclick="ficharSalidaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}',${s.horasContratadas||0},${s._horasExtra||0})">
+        ${tieneSalida ? '✓ Salida marcada' : '■ SALIR'}
       </button>
     </div>
   </div>`;
@@ -1084,27 +1088,27 @@ async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horas
   const horas = diffHoras(fichada.entrada, salida);
   const tope = horasContratadas + horasExtra;
 
-  // Verificar si supera el tope
-  if (tope > 0 && horas > tope) {
-    // Bloquear salida — requiere autorización
-    await fsSave('horas_fichadas', id, {
-      salidaTentativa: salida,
-      horasTentativas: horas,
-      bloqueadoHorasExtra: true,
-      estado: 'bloqueado-horas-extra'
-    });
-    toast(`⛔ Superás ${tope}hs contratadas. Se notificó al supervisor para autorizar.`, 'warn');
-    await cargarServiciosHoy();
-    return;
-  }
+  // Calcular desvío respecto a horas contratadas (sin bloquear)
+  const desvioHoras = tope > 0 ? Math.round((horas - tope) * 100) / 100 : 0;
+  const UMBRAL_DESVIO = 0.25; // 15 minutos
+  const hayDesvio = tope > 0 && Math.abs(desvioHoras) >= UMBRAL_DESVIO;
 
   await fsSave('horas_fichadas', id, {
     salida,
     horasTrabajadas: horas,
     bloqueadoHorasExtra: false,
-    estado: 'completo'
+    estado: 'completo',
+    desvioHoras: tope > 0 ? desvioHoras : 0,
+    alertaDesvio: hayDesvio
   });
-  toast(`✓ Salida registrada — ${horas.toFixed(1)}hs en ${clienteNombre}`, 'ok');
+
+  if (hayDesvio) {
+    const signo = desvioHoras > 0 ? '+' : '';
+    const tipo = desvioHoras > 0 ? 'extra' : 'anticipada';
+    toast(`⚠ Salida ${tipo} — ${horas.toFixed(1)}hs trabajadas (${signo}${desvioHoras.toFixed(1)}hs respecto al contrato)`, 'warn');
+  } else {
+    toast(`✓ Salida registrada — ${horas.toFixed(1)}hs en ${clienteNombre}`, 'ok');
+  }
   await cargarServiciosHoy();
 }
 
@@ -2695,7 +2699,7 @@ async function renderSupDashboard() {
   const hoy = isoHoy();
   const fichadasHoy = fichadas.filter(f => f.fecha===hoy && misOps.some(o=>o._id===f.operarioId));
   const alertasGps = fichadasHoy.filter(f => !f.gpsOk);
-  const bloqueadas = fichadasHoy.filter(f => f.estado==='bloqueado-horas-extra');
+  const alertasDesvio = fichadasHoy.filter(f => f.alertaDesvio);
 
   // Operarios que debían trabajar hoy y no ficharon
   const diaHoy = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'][new Date().getDay()];
@@ -2706,6 +2710,7 @@ async function renderSupDashboard() {
     )
   );
   const noFicharon = debianHoy.filter(o => !fichadasHoy.some(f=>f.operarioId===o._id));
+  const totalAlertas = alertasGps.length + alertasDesvio.length + noFicharon.length;
 
   c.innerHTML = `
     <div class="section-title">📊 Dashboard</div>
@@ -2715,26 +2720,25 @@ async function renderSupDashboard() {
       <div class="stat-card"><div class="stat-num">${misServicios.length}</div><div class="stat-label">Mis servicios</div></div>
       <div class="stat-card"><div class="stat-num">${misOps.length}</div><div class="stat-label">Mis operarios</div></div>
       <div class="stat-card"><div class="stat-num">${fichadasHoy.length}</div><div class="stat-label">Fichadas hoy</div></div>
-      <div class="stat-card" style="border-color:${(alertasGps.length+bloqueadas.length+noFicharon.length)>0?'rgba(214,61,74,.3)':''}">
-        <div class="stat-num" style="color:${(alertasGps.length+bloqueadas.length+noFicharon.length)>0?'var(--red)':'var(--green)'}">
-          ${alertasGps.length+bloqueadas.length+noFicharon.length}
+      <div class="stat-card" style="border-color:${totalAlertas>0?'rgba(214,61,74,.3)':''}">
+        <div class="stat-num" style="color:${totalAlertas>0?'var(--red)':'var(--green)'}">
+          ${totalAlertas}
         </div>
         <div class="stat-label">⚠ Alertas</div>
       </div>
     </div>
 
-    ${bloqueadas.length > 0 ? `
-    <div style="background:rgba(214,61,74,.08);border:1.5px solid rgba(214,61,74,.3);border-radius:12px;padding:14px;margin-bottom:12px">
-      <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--red);margin-bottom:8px">⛔ Salidas bloqueadas por horas extra (${bloqueadas.length})</div>
-      ${bloqueadas.map(f=>`
-        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:6px">
-          <div style="font-weight:600">${f.operarioNombre||'—'} → ${f.clienteNombre||'—'}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:3px">Entrada: ${f.entrada||'?'} · Salida tentativa: ${f.salidaTentativa||'?'} · ${f.horasTentativas?.toFixed?.(1)||'?'}hs</div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn-secondary" style="flex:1;padding:7px;font-size:12px" onclick="autorizarHorasExtra('${f._id}')">✓ AUTORIZAR</button>
-            <button class="btn-danger" style="flex:1;padding:7px;font-size:12px" onclick="rechazarHorasExtra('${f._id}')">✗ RECHAZAR</button>
-          </div>
-        </div>`).join('')}
+    ${alertasDesvio.length > 0 ? `
+    <div style="background:rgba(255,193,7,.07);border:1.5px solid rgba(255,193,7,.4);border-radius:12px;padding:14px;margin-bottom:12px">
+      <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--yellow);margin-bottom:8px">⏱ Desvíos de horario (${alertasDesvio.length})</div>
+      ${alertasDesvio.map(f=>{
+        const signo = (f.desvioHoras||0) > 0 ? '+' : '';
+        const tipo = (f.desvioHoras||0) > 0 ? 'extra' : 'anticipada';
+        return `<div style="font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+          👤 ${f.operarioNombre||'—'} → 🏢 ${f.clienteNombre||'—'}
+          <span style="color:var(--yellow);font-weight:700;margin-left:6px">${signo}${(f.desvioHoras||0).toFixed(1)}hs (salida ${tipo})</span>
+        </div>`;
+      }).join('')}
     </div>` : ''}
 
     ${noFicharon.length > 0 ? `
@@ -2749,7 +2753,7 @@ async function renderSupDashboard() {
       ${alertasGps.map(f=>`<div style="font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)">👤 ${f.operarioNombre||'—'} → 🏢 ${f.clienteNombre||'—'} · a ${Math.round(f.distanciaEntrada||0)}m</div>`).join('')}
     </div>` : ''}
 
-    ${fichadasHoy.length > 0 && alertasGps.length===0 && noFicharon.length===0 && bloqueadas.length===0 ? `
+    ${fichadasHoy.length > 0 && totalAlertas===0 ? `
     <div style="background:var(--green-light);border:1.5px solid rgba(39,168,90,.3);border-radius:12px;padding:14px;text-align:center;color:var(--green);font-family:var(--font-display);font-size:16px;font-weight:700">
       ✅ Todo en orden · Sin alertas hoy
     </div>` : ''}`;
@@ -2770,7 +2774,7 @@ async function renderSupFichadas() {
   );
   const hoy = isoHoy();
   const fichadasHoy = fichadas.filter(f => f.fecha===hoy && misOpsIds.has(f.operarioId));
-  const bloqueadas = fichadasHoy.filter(f => f.estado==='bloqueado-horas-extra');
+  const alertasDesvio = fichadasHoy.filter(f => f.alertaDesvio);
 
   // Operarios que debían trabajar hoy
   const diaHoy = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'][new Date().getDay()];
@@ -2786,18 +2790,17 @@ async function renderSupFichadas() {
     <div class="section-title">🔍 Control de Fichadas</div>
     <div class="section-sub">Hoy ${formatFecha(hoy)} · ${fichadasHoy.length} fichadas</div>
 
-    ${bloqueadas.length > 0 ? `
-    <div style="background:rgba(214,61,74,.08);border:1.5px solid rgba(214,61,74,.3);border-radius:12px;padding:14px;margin-bottom:12px">
-      <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--red);margin-bottom:8px">⛔ Horas extra bloqueadas</div>
-      ${bloqueadas.map(f=>`
-        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:6px">
-          <div style="font-weight:600">${f.operarioNombre||'—'} → ${f.clienteNombre||'—'}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:3px">Entrada: ${f.entrada||'?'} · Tentativa: ${f.salidaTentativa||'?'} · ${f.horasTentativas?.toFixed?.(1)||'?'}hs</div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn-secondary" style="flex:1;padding:7px;font-size:12px" onclick="autorizarHorasExtra('${f._id}')">✓ AUTORIZAR</button>
-            <button class="btn-danger" style="flex:1;padding:7px;font-size:12px" onclick="rechazarHorasExtra('${f._id}')">✗ RECHAZAR</button>
-          </div>
-        </div>`).join('')}
+    ${alertasDesvio.length > 0 ? `
+    <div style="background:rgba(255,193,7,.07);border:1.5px solid rgba(255,193,7,.4);border-radius:12px;padding:14px;margin-bottom:12px">
+      <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--yellow);margin-bottom:8px">⏱ Desvíos de horario (${alertasDesvio.length})</div>
+      ${alertasDesvio.map(f=>{
+        const signo = (f.desvioHoras||0) > 0 ? '+' : '';
+        const tipo = (f.desvioHoras||0) > 0 ? 'salida extra' : 'salida anticipada';
+        return `<div style="font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+          👤 ${f.operarioNombre||'—'} → 🏢 ${f.clienteNombre||'—'}
+          <span style="color:var(--yellow);font-weight:700;margin-left:6px">${signo}${(f.desvioHoras||0).toFixed(1)}hs (${tipo})</span>
+        </div>`;
+      }).join('')}
     </div>` : ''}
 
     ${noFicharon.length > 0 ? `
@@ -2819,6 +2822,7 @@ async function renderSupFichadas() {
               <div style="font-size:12px;color:var(--text2);margin-top:2px">🏢 ${f.clienteNombre||'—'}</div>
               <div style="font-size:12px;color:var(--text3);margin-top:2px">⏱ ${f.entrada||'?'} → ${f.salida||'<em>En curso</em>'} ${f.horasTrabajadas?'· '+f.horasTrabajadas.toFixed(1)+'hs':''}</div>
               ${!f.gpsOk?`<div style="font-size:12px;color:var(--yellow);margin-top:2px">📍 GPS ⚠ a ${Math.round(f.distanciaEntrada||0)}m del servicio</div>`:''}
+              ${f.alertaDesvio?`<div style="font-size:12px;color:var(--yellow);margin-top:2px">⏱ Desvío: ${(f.desvioHoras||0)>0?'+':''}${(f.desvioHoras||0).toFixed(1)}hs respecto al contrato</div>`:''}
             </div>
             <span class="pill ${f.gpsOk?'pill-green':'pill-yellow'}">${f.gpsOk?'GPS ✓':'GPS ⚠'}</span>
           </div>
@@ -2948,28 +2952,27 @@ async function renderSupervisor() {
   c.innerHTML = `<div class="section-title">Control</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
   const fichadas = await fsList('horas_fichadas');
   const fichadasHoy = fichadas.filter(f => f.fecha === isoHoy());
-  const bloqueadas = fichadasHoy.filter(f => f.estado === 'bloqueado-horas-extra');
+  const alertasDesvio = fichadasHoy.filter(f => f.alertaDesvio);
 
   c.innerHTML = `
     <div class="section-title">Control</div>
     <div class="section-sub">Fichadas de hoy — ${fichadasHoy.length} registros</div>
 
-    ${bloqueadas.length > 0 ? `
-    <div style="background:rgba(230,57,70,.08);border:1px solid rgba(230,57,70,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px">
-      <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--red);margin-bottom:10px">⛔ ${bloqueadas.length} fichada${bloqueadas.length>1?'s':''} bloqueada${bloqueadas.length>1?'s':''} por horas extra</div>
-      ${bloqueadas.map(f => `
-        <div style="background:var(--surface);border-radius:8px;padding:12px;margin-bottom:8px">
-          <div style="font-weight:600">${f.operarioNombre||'—'} → ${f.clienteNombre||'—'}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:4px">Entrada: ${f.entrada||'?'} · Salida tentativa: ${f.salidaTentativa||'?'} · ${f.horasTentativas?.toFixed?.(1)||'?'}hs trabajadas</div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn-secondary" style="flex:1;padding:8px" onclick="autorizarHorasExtra('${f._id}')">✓ AUTORIZAR SALIDA</button>
-            <button class="btn-danger" style="flex:1;padding:8px" onclick="rechazarHorasExtra('${f._id}')">✗ RECHAZAR</button>
-          </div>
-        </div>`).join('')}
+    ${alertasDesvio.length > 0 ? `
+    <div style="background:rgba(255,193,7,.07);border:1px solid rgba(255,193,7,.4);border-radius:12px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--yellow);margin-bottom:10px">⏱ ${alertasDesvio.length} desvío${alertasDesvio.length>1?'s':''} de horario</div>
+      ${alertasDesvio.map(f => {
+        const signo = (f.desvioHoras||0) > 0 ? '+' : '';
+        const tipo = (f.desvioHoras||0) > 0 ? 'salida extra' : 'salida anticipada';
+        return `<div style="font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+          👤 ${f.operarioNombre||'—'} → 🏢 ${f.clienteNombre||'—'}
+          <span style="color:var(--yellow);font-weight:700;margin-left:6px">${signo}${(f.desvioHoras||0).toFixed(1)}hs (${tipo})</span>
+        </div>`;
+      }).join('')}
     </div>` : ''}
 
-    ${fichadasHoy.filter(f => f.estado !== 'bloqueado-horas-extra').length === 0 ? '<div class="no-servicios"><div class="icon">📋</div><div>Sin fichadas hoy</div></div>' :
-      fichadasHoy.filter(f => f.estado !== 'bloqueado-horas-extra').map(f => `
+    ${fichadasHoy.length === 0 ? '<div class="no-servicios"><div class="icon">📋</div><div>Sin fichadas hoy</div></div>' :
+      fichadasHoy.map(f => `
         <div class="fichada-supervisor">
           <div class="fs-header">
             <div class="fs-operario">${f.operarioNombre || '—'}</div>
