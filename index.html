@@ -762,7 +762,8 @@ function iniciarApp() {
   document.getElementById('topbar-name').textContent = currentUser.nombre;
   document.getElementById('topbar-role').textContent = currentUser.rol;
   renderTabs();
-  navigateTo(currentUser.rol === 'OPERARIO' ? 'fichar' : currentUser.rol === 'SUPERVISOR' ? 'sup-dashboard' : currentUser.rol === 'LOGISTICA' ? 'logistica' : 'dashboard');
+  const ROLES_FICHAR = ['OPERARIO','ADMINISTRATIVO','PRODUCCION','DEPOSITO','ESPACIOS_VERDES'];
+  navigateTo(ROLES_FICHAR.includes(currentUser.rol) ? 'fichar' : currentUser.rol === 'SUPERVISOR' ? 'sup-dashboard' : currentUser.rol === 'LOGISTICA' ? 'logistica' : 'dashboard');
   // Prefetch en background: carga colecciones principales una sola vez al login
   prefetchColecciones();
 }
@@ -797,6 +798,26 @@ const TABS = {
   ],
   LOGISTICA: [
     { id: 'logistica', icon: '🚚', label: 'Logística' },
+  ],
+  ADMINISTRATIVO: [
+    { id: 'fichar', icon: '📍', label: 'Fichar' },
+    { id: 'agenda', icon: '📆', label: 'Mi Agenda' },
+    { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
+  ],
+  PRODUCCION: [
+    { id: 'fichar', icon: '📍', label: 'Fichar' },
+    { id: 'agenda', icon: '📆', label: 'Mi Agenda' },
+    { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
+  ],
+  DEPOSITO: [
+    { id: 'fichar', icon: '📍', label: 'Fichar' },
+    { id: 'agenda', icon: '📆', label: 'Mi Agenda' },
+    { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
+  ],
+  ESPACIOS_VERDES: [
+    { id: 'fichar', icon: '📍', label: 'Fichar' },
+    { id: 'agenda', icon: '📆', label: 'Mi Agenda' },
+    { id: 'mis-horas', icon: '⏱', label: 'Mis Horas' },
   ]
 };
 
@@ -1363,7 +1384,7 @@ function filtrarOperarios() {
             <div class="list-item-name">${o.nombre||'—'}</div>
             <div class="list-item-sub">
               DNI: ${o.dni||'<em style="color:var(--text3)">Sin cargar</em>'}
-              &nbsp;·&nbsp; <span class="pill ${o.rol==='ADMIN'?'pill-blue':o.rol==='SUPERVISOR'?'pill-yellow':o.rol==='LOGISTICA'?'pill-green':'pill-gray'}">${o.rol||'OPERARIO'}</span>
+              &nbsp;·&nbsp; <span class="pill ${o.rol==='ADMIN'?'pill-blue':o.rol==='SUPERVISOR'?'pill-yellow':o.rol==='LOGISTICA'?'pill-green':['ADMINISTRATIVO','PRODUCCION','DEPOSITO','ESPACIOS_VERDES'].includes(o.rol)?'pill-orange':'pill-gray'}">${o.rol||'OPERARIO'}</span>
               &nbsp;·&nbsp; ${o.tipo==='FIJO'?`Fijo ${o.horasSemana||0}hs/sem`:'Variable'}
               ${o.barrio ? `&nbsp;·&nbsp; 📍 ${o.barrio}` : ''}
               ${!o.password || !o.dni ? '&nbsp;·&nbsp; <span style="color:var(--yellow)">⚠ Incompleto</span>' : ''}
@@ -1466,6 +1487,10 @@ async function modalOperario(id = null) {
               <option value="SUPERVISOR" ${o.rol==='SUPERVISOR'?'selected':''}>Supervisor</option>
               <option value="ADMIN" ${o.rol==='ADMIN'?'selected':''}>Admin</option>
               <option value="LOGISTICA" ${o.rol==='LOGISTICA'?'selected':''}>Logística</option>
+              <option value="ADMINISTRATIVO" ${(o.rol||'OPERARIO')==='ADMINISTRATIVO'?'selected':''}>Administrativo</option>
+              <option value="PRODUCCION" ${o.rol==='PRODUCCION'?'selected':''}>Producción</option>
+              <option value="DEPOSITO" ${o.rol==='DEPOSITO'?'selected':''}>Depósito</option>
+              <option value="ESPACIOS_VERDES" ${o.rol==='ESPACIOS_VERDES'?'selected':''}>Espacios Verdes</option>
             </select>
           </div>
           <div class="field-sm"><label>Tipo liquidación</label>
@@ -2242,6 +2267,7 @@ async function renderGestionAccesos() {
   const usuarios = await fsList('horas_usuarios');
   const admins = usuarios.filter(u => u.rol === 'ADMIN').sort((a,b)=>a.nombre.localeCompare(b.nombre));
   const supervisores = usuarios.filter(u => u.rol === 'SUPERVISOR').sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const logistica = usuarios.filter(u => u.rol === 'LOGISTICA').sort((a,b)=>a.nombre.localeCompare(b.nombre));
   const operarios = usuarios.filter(u => u.rol === 'OPERARIO').sort((a,b)=>a.nombre.localeCompare(b.nombre));
 
   window._accesosTodos = usuarios;
@@ -2270,6 +2296,15 @@ async function renderGestionAccesos() {
     <div id="acc-supervisores" style="margin-bottom:16px">
       ${supervisores.map(u => renderFilaAcceso(u)).join('')}
       <button class="btn-secondary" style="width:100%;padding:8px;font-size:13px;margin-top:6px;border-style:dashed" onclick="modalNuevoAcceso('SUPERVISOR')">+ Agregar supervisor</button>
+    </div>
+
+    <!-- LOGISTICA -->
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--green);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">
+      🚚 Logística (${logistica.length})
+    </div>
+    <div id="acc-logistica" style="margin-bottom:16px">
+      ${logistica.map(u => renderFilaAcceso(u)).join('')}
+      <button class="btn-secondary" style="width:100%;padding:8px;font-size:13px;margin-top:6px;border-style:dashed" onclick="modalNuevoAcceso('LOGISTICA')">+ Agregar logística</button>
     </div>
 
     <!-- OPERARIOS -->
@@ -2317,9 +2352,9 @@ function filtrarAccesosOps() {
 function filtrarAccesos() {
   const q = (document.getElementById('acc-buscar')?.value||'').toLowerCase().replace(/,/g,' ');
   const todos = window._accesosTodos || [];
-  ['ADMIN','SUPERVISOR','OPERARIO'].forEach(rol => {
+  ['ADMIN','SUPERVISOR','LOGISTICA','OPERARIO'].forEach(rol => {
     const lista = todos.filter(u=>u.rol===rol && ((u.nombre||'').toLowerCase().replace(/,/g,' ').includes(q)||(u.dni||'').includes(q)));
-    const key = rol==='ADMIN'?'admins':rol==='SUPERVISOR'?'supervisores':'ops-lista';
+    const key = rol==='ADMIN'?'admins':rol==='SUPERVISOR'?'supervisores':rol==='LOGISTICA'?'logistica':'ops-lista';
     const cont = document.getElementById(`acc-${key}`);
     if (cont) {
       const html = lista.map(u=>renderFilaAcceso(u)).join('');
@@ -2340,6 +2375,8 @@ async function eliminarAcceso(id, nombre, rol) {
     ? `⚠ Vas a eliminar al administrador "${nombre}". ¿Confirmás?`
     : rol === 'SUPERVISOR'
     ? `Vas a eliminar al supervisor "${nombre}" y su acceso al sistema. ¿Confirmás?`
+    : rol === 'LOGISTICA'
+    ? `Vas a eliminar al usuario de logística "${nombre}". ¿Confirmás?`
     : `Vas a eliminar el acceso de "${nombre}" al sistema. El perfil del operario se mantiene. ¿Confirmás?`;
 
   if (!confirm(msg)) return;
@@ -2380,6 +2417,11 @@ async function modalEditarAcceso(id) {
             <option value="OPERARIO" ${u.rol==='OPERARIO'?'selected':''}>👷 Operario</option>
             <option value="SUPERVISOR" ${u.rol==='SUPERVISOR'?'selected':''}>🏷 Supervisor</option>
             <option value="ADMIN" ${u.rol==='ADMIN'?'selected':''}>👑 Administrador</option>
+            <option value="LOGISTICA" ${u.rol==='LOGISTICA'?'selected':''}>🚚 Logística</option>
+            <option value="ADMINISTRATIVO" ${u.rol==='ADMINISTRATIVO'?'selected':''}>📋 Administrativo</option>
+            <option value="PRODUCCION" ${u.rol==='PRODUCCION'?'selected':''}>🏭 Producción</option>
+            <option value="DEPOSITO" ${u.rol==='DEPOSITO'?'selected':''}>📦 Depósito</option>
+            <option value="ESPACIOS_VERDES" ${u.rol==='ESPACIOS_VERDES'?'selected':''}>🌿 Espacios Verdes</option>
           </select>
         </div>
 
