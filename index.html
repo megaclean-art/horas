@@ -1732,6 +1732,13 @@ async function modalServicio(id = null) {
           <label>Cliente / Administrador <span style="color:var(--text3);font-size:10px">(para agrupar servicios del mismo cliente)</span></label>
           <input id="sv-admin" placeholder="Ej: Adm Olocco" value="${s.adminCliente||''}">
         </div>
+        <div class="field-sm">
+          <label>Zona logística</label>
+          <select id="sv-zona" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none">
+            <option value="">— Sin asignar —</option>
+            ${['CENTRO','NUEVA CORDOBA','GENERAL PAZ','ALTA CORDOBA','NORTE','OESTE','SUR','INTER FABRICA - ESTE','VILLA ALLENDE','CARLOS PAZ','INTERNA','SIN INSUMOS'].map(z => `<option value="${z}" ${(s.zona||'')=== z ?'selected':''}>${z}</option>`).join('')}
+          </select>
+        </div>
 
         <!-- DÍAS CON HORARIO POR DÍA -->
         <div class="field-sm">
@@ -1972,6 +1979,7 @@ async function guardarServicio(id = '') {
   const idSupervisor = document.getElementById('sv-idsup').value.trim();
   const supervisor = document.getElementById('sv-sup').value.trim();
   const adminCliente = document.getElementById('sv-admin')?.value.trim() || '';
+  const zona = document.getElementById('sv-zona')?.value || '';
   const radioGps = Number(document.getElementById('sv-radio').value) || 300;
   // Guardar operarios como [{id, fechaInicio}] para trazabilidad
   // Usar el contenedor específico para evitar capturar checkboxes de otras secciones
@@ -2009,7 +2017,7 @@ async function guardarServicio(id = '') {
   const horasContratadas = diasSelServ.length > 0 ? hsTotalSemana / diasSelServ.length : 0;
 
   const data = {
-    cliente, direccion, codigo, idSupervisor, supervisor, adminCliente,
+    cliente, direccion, codigo, idSupervisor, supervisor, adminCliente, zona,
     horaInicio, horaFin, horasContratadas,
     horasPorSemana: hsTotalSemana,
     radioGps,
