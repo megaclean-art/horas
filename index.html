@@ -1440,6 +1440,14 @@ async function verOperario(id) {
             <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Contraseña</div>
             <div style="font-size:16px;font-weight:700">${o.password||'—'}</div>
           </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Fecha Ingreso</div>
+            <div style="font-size:15px;font-weight:700;color:var(--green)">${o.fechaIngreso ? formatFecha(o.fechaIngreso) : '—'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Fecha Egreso</div>
+            <div style="font-size:15px;font-weight:700;color:${o.fechaEgreso?'var(--red)':'var(--text3)'}">${o.fechaEgreso ? formatFecha(o.fechaEgreso) : '—'}</div>
+          </div>
         </div>
         ${o.direccion||o.barrio ? `
         <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:14px">
@@ -1518,6 +1526,16 @@ async function modalOperario(id = null) {
         </div>
         <div class="form-row">
           <div class="field-sm">
+            <label>Fecha de Ingreso <span style="color:var(--green);font-size:10px">(alta empresa)</span></label>
+            <input id="op-fingreso" type="date" value="${o.fechaIngreso||''}">
+          </div>
+          <div class="field-sm">
+            <label>Fecha de Egreso <span style="color:var(--red);font-size:10px">(baja empresa)</span></label>
+            <input id="op-fegreso" type="date" value="${o.fechaEgreso||''}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field-sm">
             <label>Dirección</label>
             <input id="op-direccion" placeholder="Ej: Av. Colón 1234" value="${o.direccion||''}">
           </div>
@@ -1553,6 +1571,8 @@ async function guardarOperario(id = '') {
   const legajo = document.getElementById('op-legajo')?.value.trim() || '';
   const direccion = document.getElementById('op-direccion')?.value.trim() || '';
   const barrio = document.getElementById('op-barrio')?.value.trim() || '';
+  const fechaIngreso = document.getElementById('op-fingreso')?.value || '';
+  const fechaEgreso = document.getElementById('op-fegreso')?.value || '';
 
   if (!nombre) return toast('El nombre es obligatorio', 'warn');
   if (!id && !pass) return toast('La contraseña es obligatoria para usuarios nuevos', 'warn');
@@ -1563,6 +1583,8 @@ async function guardarOperario(id = '') {
   if (direccion) data.direccion = direccion;
   if (barrio) data.barrio = barrio;
   if (pass) data.password = pass;
+  if (fechaIngreso) data.fechaIngreso = fechaIngreso;
+  if (fechaEgreso) data.fechaEgreso = fechaEgreso;
 
   if (id) {
     await fsSave('horas_usuarios', id, data);
@@ -1733,7 +1755,11 @@ async function modalServicio(id = null) {
   const opsObjs = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
   const opsIds = opsObjs.map(o => o.id);
   const opsFechaMap = {}; // id -> fechaInicio
-  opsObjs.forEach(o => { opsFechaMap[o.id] = o.fechaInicio || ''; });
+  const opsFechaFinMap = {}; // id -> fechaFin
+  opsObjs.forEach(o => {
+    opsFechaMap[o.id] = o.fechaInicio || '';
+    opsFechaFinMap[o.id] = o.fechaFin || '';
+  });
   const opsList = operarios.filter(o => o.rol === 'OPERARIO').sort((a,b) => a.nombre.localeCompare(b.nombre));
 
   // Horarios por día — leer estructura existente o heredar el horario general
@@ -1816,10 +1842,15 @@ async function modalServicio(id = null) {
                     <div style="font-size:11px;color:var(--text3)">DNI: ${o.dni||'—'}</div>
                   </div>
                 </div>
-                <div id="fecha-row-${o._id}" style="display:${opsIds.includes(o._id)?'flex':'none'};align-items:center;gap:6px;padding:4px 0 2px 28px;width:100%">
+                <div id="fecha-row-${o._id}" style="display:${opsIds.includes(o._id)?'flex':'none'};align-items:center;gap:6px;padding:4px 0 2px 28px;width:100%;flex-wrap:wrap">
                   <span style="font-size:11px;color:var(--text3);white-space:nowrap">Desde:</span>
                   <input type="date" id="fecha-${o._id}" value="${opsFechaMap[o._id]||''}"
                     style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);outline:none">
+                  <span style="font-size:11px;color:var(--text3);white-space:nowrap;margin-left:6px">Hasta:</span>
+                  <input type="date" id="fechafin-${o._id}" value="${opsFechaFinMap[o._id]||''}"
+                    style="font-size:12px;padding:3px 6px;border:1px solid rgba(214,61,74,.4);border-radius:5px;background:var(--bg);color:var(--text);outline:none"
+                    placeholder="(activo)">
+                  <span style="font-size:10px;color:var(--text3);font-style:italic">(vacío = activo)</span>
                 </div>
               </div>`).join('')}
           </div>
@@ -2015,15 +2046,38 @@ async function guardarServicio(id = '') {
   const adminCliente = document.getElementById('sv-admin')?.value.trim() || '';
   const zona = document.getElementById('sv-zona')?.value || '';
   const radioGps = Number(document.getElementById('sv-radio').value) || 300;
-  // Guardar operarios como [{id, fechaInicio}] para trazabilidad
-  // Usar el contenedor específico para evitar capturar checkboxes de otras secciones
-  const operariosSelec = Array.from(document.querySelectorAll('#sv-ops-lista [id^="chk-"]'))
+  // Guardar operarios como [{id, fechaInicio, fechaFin}] para trazabilidad + histórico
+  // Primero recuperar históricos (operarios con fechaFin que ya no están chequeados)
+  // para no perder el registro de quien trabajó antes
+  const checkeados = new Set(
+    Array.from(document.querySelectorAll('#sv-ops-lista [id^="chk-"]'))
+      .filter(c => c.checked)
+      .map(c => c.id.replace('chk-', ''))
+  );
+  // Operarios activos (chequeados)
+  const operariosActivos = Array.from(document.querySelectorAll('#sv-ops-lista [id^="chk-"]'))
     .filter(c => c.checked)
     .map(c => {
       const opId = c.id.replace('chk-', '');
       const fi = document.getElementById(`fecha-${opId}`)?.value || '';
-      return { id: opId, fechaInicio: fi };
+      const ff = document.getElementById(`fechafin-${opId}`)?.value || '';
+      return { id: opId, fechaInicio: fi, fechaFin: ff };
     });
+  // Recuperar históricos del servicio anterior (operarios con fechaFin no vacía que no están chequeados)
+  let historicos = [];
+  if (id) {
+    try {
+      const sActual = await fsGet('horas_servicios', id);
+      let opsAntes = sActual?.operarios || [];
+      if (typeof opsAntes === 'string') { try { opsAntes = JSON.parse(opsAntes); } catch { opsAntes = []; } }
+      if (Array.isArray(opsAntes)) {
+        historicos = opsAntes
+          .map(o => typeof o === 'string' ? { id: o, fechaInicio: '', fechaFin: '' } : o)
+          .filter(o => o.fechaFin && !checkeados.has(o.id)); // solo los que ya tienen fechaFin (son históricos)
+      }
+    } catch {}
+  }
+  const operariosSelec = [...operariosActivos, ...historicos];
 
   if (!cliente) return toast('El nombre del cliente es obligatorio', 'warn');
   if (diasSelServ.length === 0) return toast('Seleccioná al menos un día', 'warn');
@@ -2183,27 +2237,38 @@ async function verServicio(id) {
           }).join('')}
         </div>
 
-        <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">
-          Operarios asignados (${opsNorm.length})
-        </div>
-        ${opsNorm.length===0?'<div style="font-size:13px;color:var(--text3);font-style:italic;margin-bottom:14px">Sin asignar</div>':          opsNorm.map(o=>{
+        ${(()=>{
+          const activos = opsNorm.filter(o => !o.fechaFin);
+          const historicos = opsNorm.filter(o => !!o.fechaFin);
+          const renderOp = (o, esHistorico) => {
             const nombre = _operariosCache.find(op=>op._id===o.id)?.nombre || o.id;
-            const rep = reemplazos[o.id];
-            const fechaStr = o.fechaInicio
-              ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">desde ${formatFecha(o.fechaInicio)}</span>`
-              : `<span style="font-size:10px;color:var(--text3);margin-left:6px;font-style:italic">sin fecha reg.</span>`;
+            const rep = !esHistorico ? reemplazos[o.id] : null;
+            const periodoStr = (o.fechaInicio || o.fechaFin)
+              ? '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + (o.fechaInicio?'desde '+formatFecha(o.fechaInicio):'') + (o.fechaFin?' → '+formatFecha(o.fechaFin):'') + '</span>'
+              : '<span style="font-size:10px;color:var(--text3);margin-left:6px;font-style:italic">sin fecha reg.</span>';
             const repDiv = rep
-              ? `<div style="font-size:11px;padding:4px 8px;margin-top:3px;background:rgba(224,123,42,.1);border-radius:6px;border-left:3px solid var(--yellow)">⚠ De licencia → reemplaza: <strong>${rep.nombre}</strong>${rep.fechaFin?' · hasta '+formatFecha(rep.fechaFin):''}</div>`
+              ? '<div style="font-size:11px;padding:4px 8px;margin-top:3px;background:rgba(224,123,42,.1);border-radius:6px;border-left:3px solid var(--yellow)">⚠ De licencia → reemplaza: <strong>' + rep.nombre + '</strong>' + (rep.fechaFin?' · hasta '+formatFecha(rep.fechaFin):'') + '</div>'
               : '';
-            return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
-              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:3px">
-                <span style="font-size:13px;color:${rep?'var(--text3)':'var(--accent)'}">👷 ${nombre}</span>
-                ${fechaStr}
-                ${rep?'<span style="font-size:10px;padding:1px 6px;background:var(--yellow);color:#fff;border-radius:8px;margin-left:4px">AUSENTE</span>':''}
-              </div>
-              ${repDiv}
-            </div>`;
-          }).join('')}
+            const colorSpan = esHistorico ? 'var(--text3)' : (rep ? 'var(--text3)' : 'var(--accent)');
+            const opacityVal = esHistorico ? '0.6' : '1';
+            return '<div style="padding:6px 0;border-bottom:1px solid var(--border);opacity:' + opacityVal + '">'
+              + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:3px">'
+              + '<span style="font-size:13px;color:' + colorSpan + '">👷 ' + nombre + '</span>'
+              + periodoStr
+              + (esHistorico ? '<span style="font-size:9px;padding:1px 5px;background:var(--surface2);color:var(--text3);border-radius:8px;border:1px solid var(--border)">HISTÓRICO</span>' : '')
+              + (!esHistorico && rep ? '<span style="font-size:10px;padding:1px 6px;background:var(--yellow);color:#fff;border-radius:8px;margin-left:4px">AUSENTE</span>' : '')
+              + '</div>'
+              + repDiv
+              + '</div>';
+          };
+          let html = '<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Operarios activos (' + activos.length + ')</div>';
+          html += activos.length===0 ? '<div style="font-size:13px;color:var(--text3);font-style:italic;margin-bottom:6px">Sin asignar</div>' : activos.map(o=>renderOp(o,false)).join('');
+          if (historicos.length > 0) {
+            html += '<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-top:10px;margin-bottom:6px">Histórico (' + historicos.length + ')</div>';
+            html += historicos.map(o=>renderOp(o,true)).join('');
+          }
+          return html;
+        })()}
 
         <div class="modal-actions" style="margin-top:14px">
           <button class="btn-secondary" onclick="cerrarModal()">CERRAR</button>
@@ -4378,9 +4443,13 @@ async function renderReporteBancoHoras() {
     horasFichadasMes[f.operarioId] = (horasFichadasMes[f.operarioId] || 0) + f.horasTrabajadas;
   }
 
-  // ── HELPER: contar ocurrencias reales de días de esquema dentro de un período ──
-  // Devuelve cantidad de veces que caen los días (ej: ['LUN','JUE']) entre fechaDesde y fechaHasta inclusive
+  // ══════════════════════════════════════════════════════════════
+  // HELPERS DE CÁLCULO PROPORCIONAL (método Skylab: 4 semanas/mes)
+  // ══════════════════════════════════════════════════════════════
+
+  // Cuenta ocurrencias reales de días de esquema entre dos fechas inclusive
   function contarOcurrenciasDias(diasEsquema, fechaDesde, fechaHasta) {
+    if (!diasEsquema.length || fechaDesde > fechaHasta) return 0;
     const DIAS_MAP = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
     let count = 0;
     const cur = new Date(fechaDesde + 'T12:00:00');
@@ -4392,124 +4461,188 @@ async function renderReporteBancoHoras() {
     return count;
   }
 
-  // ── HELPER: calcular horas fijas de un operario en un servicio para un período ──
-  // Si el período es el mes completo → 4 semanas × diasSemana × hsPorDia
-  // Si es parcial → conteo real de ocurrencias × hsPorDia
-  function calcHsServicioPeriodo(srv, diasEsquema, hsPorDia, fechaDesde, fechaHasta, primerDiaMes, ultimoDiaMes) {
-    const esMesCompleto = fechaDesde <= primerDiaMes && fechaHasta >= ultimoDiaMes;
-    if (esMesCompleto) {
-      // Método Skylab: 4 semanas × días/semana × hs/día
-      return diasEsquema.length * 4 * hsPorDia;
-    } else {
-      // Período parcial: contar ocurrencias reales del patrón
-      const ocurrencias = contarOcurrenciasDias(diasEsquema, fechaDesde, fechaHasta);
-      return ocurrencias * hsPorDia;
+  // Calcula hs trabajadas de un operario en un servicio para un período
+  // Si cubre el mes completo → método Skylab (4×días/sem×hs/día)
+  // Si es parcial → conteo real de ocurrencias × hs/día
+  function calcHsPeriodo(diasEsquema, hsPorDiaMap, fechaDesde, fechaHasta, primerDia, ultimoDia) {
+    const esMesCompleto = fechaDesde <= primerDia;
+    let hsTotal = 0;
+    for (const dia of diasEsquema) {
+      const hsDia = hsPorDiaMap[dia] || 0;
+      if (hsDia === 0) continue;
+      if (esMesCompleto && fechaHasta >= ultimoDia) {
+        // Mes completo: 4 semanas
+        hsTotal += 4 * hsDia;
+      } else {
+        // Parcial: contar ocurrencias reales de ese día específico
+        hsTotal += contarOcurrenciasDias([dia], fechaDesde, fechaHasta) * hsDia;
+      }
     }
+    return hsTotal;
   }
 
-  // ── HORAS FIJAS POR OPERARIO ──
-  // Para cada servicio, por cada operario asignado, calcular según su período activo en el mes
-  const horasFijasMes = {};
-  // También calculamos recibo proporcional para altas/bajas de empleado nuevo
-  const reciboProporcionado = {}; // { opId: hsReciboAjustado } — solo si es alta/baja en el mes
-
+  // ══════════════════════════════════════════════════════════════
+  // CÁLCULO DE PERÍODOS DEL MES
+  // ══════════════════════════════════════════════════════════════
   const [anioMes, numMes] = mesActual.split('-').map(Number);
   const primerDiaMes = mesActual + '-01';
   const ultimoDiaMes = mesActual + '-' + String(new Date(anioMes, numMes, 0).getDate()).padStart(2,'0');
+
+  // ══════════════════════════════════════════════════════════════
+  // HORAS FIJAS + RECIBO PROPORCIONAL
+  // ══════════════════════════════════════════════════════════════
+  const horasFijasMes = {}; // { opId: hs }
+  // Detalle por servicio para el reporte: { opId: [{cliente, dias, periodo, hs, esHistorico}] }
+  const detalleFijosPorOp = {};
+
+  // Mapa de recibo proporcional por motivo de alta/baja en empresa
+  // { opId: { reciboAjustado, motivo, fecha } }
+  const reciboProporcionado = {};
 
   for (const srv of servicios) {
     const diasEsquema = Array.isArray(srv.dias) ? srv.dias : [];
     if (!diasEsquema.length) continue;
 
-    // Calcular horas por día del servicio
-    let hsPorDia = 0;
+    // Construir mapa hs por día
     let horariosPorDia = {};
     try {
-      if (srv.horariosPorDia) {
-        horariosPorDia = typeof srv.horariosPorDia === 'string' ? JSON.parse(srv.horariosPorDia) : srv.horariosPorDia;
-      }
+      if (srv.horariosPorDia) horariosPorDia = typeof srv.horariosPorDia === 'string' ? JSON.parse(srv.horariosPorDia) : srv.horariosPorDia;
     } catch {}
-    // Si tiene horarios por día diferenciados, usar promedio ponderado
     const hsPorDiaMap = {};
     for (const dia of diasEsquema) {
-      if (horariosPorDia[dia]?.hs) {
+      if (horariosPorDia[dia]?.hs && Number(horariosPorDia[dia].hs) > 0) {
         hsPorDiaMap[dia] = Number(horariosPorDia[dia].hs);
       } else {
-        // Fallback: horasPorSemana / cantidad de días, o horasContratadas
         const hsSemanales = Number(srv.horasPorSemana) || (Number(srv.horasContratadas)||0) * diasEsquema.length;
         hsPorDiaMap[dia] = diasEsquema.length > 0 ? hsSemanales / diasEsquema.length : 0;
       }
     }
 
-    // Parsear operarios del servicio como objetos {id, fechaInicio}
+    // Parsear operarios del servicio (activos + históricos)
     let opsRawSrv = srv.operarios;
     if (typeof opsRawSrv === 'string') { try { opsRawSrv = JSON.parse(opsRawSrv); } catch { opsRawSrv = []; } }
     if (!Array.isArray(opsRawSrv)) opsRawSrv = [];
-    const opsObjsSrv = opsRawSrv.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
+    const opsObjsSrv = opsRawSrv.map(o => typeof o === 'string' ? { id: o, fechaInicio: '', fechaFin: '' } : o);
 
     for (const opObj of opsObjsSrv) {
       const opId = opObj.id;
       if (!opId) continue;
 
-      // Determinar período activo del operario en este servicio dentro del mes
+      // Determinar período activo en este servicio dentro del mes
+      // fechaInicio/fechaFin son del operario en el servicio (reasignación)
       let fechaDesde = primerDiaMes;
       let fechaHasta = ultimoDiaMes;
-      let esAltaEnMes = false;
-      let esBajaEnMes = false;
 
-      if (opObj.fechaInicio) {
-        // Si la fechaInicio cae dentro del mes → alta parcial
-        if (opObj.fechaInicio > primerDiaMes && opObj.fechaInicio <= ultimoDiaMes) {
-          fechaDesde = opObj.fechaInicio;
-          esAltaEnMes = true;
-        } else if (opObj.fechaInicio > ultimoDiaMes) {
-          // Todavía no empezó este mes → no sumar
-          continue;
-        }
-        // Si fechaInicio < primerDiaMes → ya estaba activo, usa todo el mes
+      // Inicio en el servicio
+      if (opObj.fechaInicio && opObj.fechaInicio > ultimoDiaMes) continue; // no empezó este mes
+      if (opObj.fechaInicio && opObj.fechaInicio > primerDiaMes) {
+        fechaDesde = opObj.fechaInicio; // alta parcial en el mes
       }
 
-      // Calcular horas trabajadas proporcionales para cada día del esquema
-      // (puede haber días con distintas hs → calcular por día)
-      let hsOperario = 0;
-      for (const dia of diasEsquema) {
-        const hsDia = hsPorDiaMap[dia] || 0;
-        if (hsDia === 0) continue;
-        const esMesCompleto = fechaDesde <= primerDiaMes;
-        if (esMesCompleto) {
-          // Mes completo: 4 semanas
-          hsOperario += 4 * hsDia;
-        } else {
-          // Parcial: contar ocurrencias reales del patrón para ESE día específico
-          const ocurrencias = contarOcurrenciasDias([dia], fechaDesde, fechaHasta);
-          hsOperario += ocurrencias * hsDia;
-        }
+      // Fin en el servicio (salida del objetivo)
+      if (opObj.fechaFin) {
+        if (opObj.fechaFin < primerDiaMes) continue; // ya salió antes de este mes
+        if (opObj.fechaFin < ultimoDiaMes) fechaHasta = opObj.fechaFin; // salida parcial
       }
-      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + hsOperario;
 
-      // ── RECIBO PROPORCIONAL solo para alta de empleado nuevo en el mes ──
-      // Condición: fechaInicio del operario en ESTE servicio cae dentro del mes
-      // y NO es el primer día del mes
-      if (esAltaEnMes && opObj.fechaInicio > primerDiaMes) {
-        // Calcular horas de recibo proporcionales para este servicio
-        // usando el mismo método: 4 semanas × ocurrencias proporcionales
-        // La proporción es: ocurrencias reales desde alta / ocurrencias en mes completo (4×días/sem)
-        const ocurrenciasReales = contarOcurrenciasDias(diasEsquema, fechaDesde, ultimoDiaMes);
-        const ocurrenciasMesCompleto = diasEsquema.length * 4;
-        // hs recibo base del operario (de su ficha)
-        const opData = operarios.find(op => op._id === opId);
-        if (opData && opData.horasRecibo) {
-          const reciboBase = Number(opData.horasRecibo) || 0;
-          // Proporcionar solo la parte de este servicio
-          // (si tiene múltiples servicios, cada uno aporta su parte)
-          const hsReciboPorServicio = ocurrenciasMesCompleto > 0
-            ? reciboBase * (ocurrenciasReales / ocurrenciasMesCompleto)
-            : 0;
-          if (!reciboProporcionado[opId]) reciboProporcionado[opId] = { ajuste: 0, esAlta: true };
-          reciboProporcionado[opId].ajuste += hsReciboPorServicio - reciboBase;
-          reciboProporcionado[opId].fechaAlta = opObj.fechaInicio;
+      // Calcular horas trabajadas para el período
+      const hsPeriodo = calcHsPeriodo(diasEsquema, hsPorDiaMap, fechaDesde, fechaHasta, primerDiaMes, ultimoDiaMes);
+      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + hsPeriodo;
+
+      // Guardar detalle para reporte por operario
+      if (!detalleFijosPorOp[opId]) detalleFijosPorOp[opId] = [];
+      detalleFijosPorOp[opId].push({
+        servicioId: srv._id,
+        cliente: srv.cliente || '—',
+        codigo: srv.codigo || '',
+        dias: diasEsquema,
+        horariosPorDia,
+        hsPorDiaMap,
+        fechaDesde,
+        fechaHasta,
+        esMesCompleto: fechaDesde <= primerDiaMes && fechaHasta >= ultimoDiaMes,
+        hs: hsPeriodo
+      });
+    }
+  }
+
+  // ── RECIBO PROPORCIONAL: solo por alta/baja en la empresa ──
+  // Usa fechaIngreso / fechaEgreso del legajo del operario
+  for (const op of operarios) {
+    if (op.rol !== 'OPERARIO' || !op.horasRecibo) continue;
+    const reciboBase = Number(op.horasRecibo) || 0;
+    let reciboAjustado = reciboBase;
+    let motivoProporc = null;
+    let fechaProporc = null;
+
+    // Alta nueva: fechaIngreso cae en el mes actual y no es el 1°
+    if (op.fechaIngreso && op.fechaIngreso.startsWith(mesActual) && op.fechaIngreso > primerDiaMes) {
+      // Calcular proporción: ocurrencias reales desde ingreso / total mes completo
+      // Usamos los servicios del operario como referencia de sus días de trabajo
+      const srvs = servicios.filter(s => {
+        let ops = s.operarios;
+        if (typeof ops === 'string') { try { ops = JSON.parse(ops); } catch { ops = []; } }
+        if (!Array.isArray(ops)) ops = [];
+        return ops.some(o => (typeof o === 'string' ? o : o?.id) === op._id && !o?.fechaFin);
+      });
+      if (srvs.length > 0) {
+        // Calcular hs del mes completo vs hs desde ingreso
+        let hsMesCompleto = 0;
+        let hsDesdeIngreso = 0;
+        for (const srv of srvs) {
+          const dias = Array.isArray(srv.dias) ? srv.dias : [];
+          if (!dias.length) continue;
+          let hpd = {};
+          try { if (srv.horariosPorDia) hpd = typeof srv.horariosPorDia==='string'?JSON.parse(srv.horariosPorDia):srv.horariosPorDia; } catch {}
+          const hpdMap = {};
+          for (const d of dias) {
+            if (hpd[d]?.hs) hpdMap[d] = Number(hpd[d].hs);
+            else { const hs = Number(srv.horasPorSemana)||(Number(srv.horasContratadas)||0)*dias.length; hpdMap[d] = dias.length ? hs/dias.length : 0; }
+          }
+          hsMesCompleto += calcHsPeriodo(dias, hpdMap, primerDiaMes, ultimoDiaMes, primerDiaMes, ultimoDiaMes);
+          hsDesdeIngreso += calcHsPeriodo(dias, hpdMap, op.fechaIngreso, ultimoDiaMes, primerDiaMes, ultimoDiaMes);
+        }
+        if (hsMesCompleto > 0) {
+          reciboAjustado = Math.round(reciboBase * (hsDesdeIngreso / hsMesCompleto) * 10) / 10;
+          motivoProporc = 'ALTA';
+          fechaProporc = op.fechaIngreso;
         }
       }
+    }
+    // Baja: fechaEgreso cae en el mes actual y no es el último día
+    else if (op.fechaEgreso && op.fechaEgreso.startsWith(mesActual) && op.fechaEgreso < ultimoDiaMes) {
+      const srvs = servicios.filter(s => {
+        let ops = s.operarios;
+        if (typeof ops === 'string') { try { ops = JSON.parse(ops); } catch { ops = []; } }
+        if (!Array.isArray(ops)) ops = [];
+        return ops.some(o => (typeof o === 'string' ? o : o?.id) === op._id);
+      });
+      if (srvs.length > 0) {
+        let hsMesCompleto = 0;
+        let hsHastaEgreso = 0;
+        for (const srv of srvs) {
+          const dias = Array.isArray(srv.dias) ? srv.dias : [];
+          if (!dias.length) continue;
+          let hpd = {};
+          try { if (srv.horariosPorDia) hpd = typeof srv.horariosPorDia==='string'?JSON.parse(srv.horariosPorDia):srv.horariosPorDia; } catch {}
+          const hpdMap = {};
+          for (const d of dias) {
+            if (hpd[d]?.hs) hpdMap[d] = Number(hpd[d].hs);
+            else { const hs = Number(srv.horasPorSemana)||(Number(srv.horasContratadas)||0)*dias.length; hpdMap[d] = dias.length ? hs/dias.length : 0; }
+          }
+          hsMesCompleto += calcHsPeriodo(dias, hpdMap, primerDiaMes, ultimoDiaMes, primerDiaMes, ultimoDiaMes);
+          hsHastaEgreso += calcHsPeriodo(dias, hpdMap, primerDiaMes, op.fechaEgreso, primerDiaMes, ultimoDiaMes);
+        }
+        if (hsMesCompleto > 0) {
+          reciboAjustado = Math.round(reciboBase * (hsHastaEgreso / hsMesCompleto) * 10) / 10;
+          motivoProporc = 'BAJA';
+          fechaProporc = op.fechaEgreso;
+        }
+      }
+    }
+
+    if (motivoProporc) {
+      reciboProporcionado[op._id] = { reciboAjustado, reciboBase, motivo: motivoProporc, fecha: fechaProporc };
     }
   }
 
@@ -4598,13 +4731,10 @@ async function renderReporteBancoHoras() {
   // Total = fijas + variables fichadas + coberturas estimadas
   const ops = operarios.filter(o => o.rol === 'OPERARIO' && o.horasRecibo);
   const rows = ops.map(o => {
-    // Recibo: usar proporcional si es alta de empleado nuevo en el mes
-    const reciboBase = Number(o.horasRecibo) || 0;
     const propInfo = reciboProporcionado[o._id];
-    // propInfo.ajuste es negativo (descuento proporcional)
-    const recibo = propInfo ? Math.max(0, reciboBase + propInfo.ajuste) : reciboBase;
-    const esReciboProporc = !!propInfo && propInfo.ajuste !== 0;
-
+    const reciboBase = Number(o.horasRecibo) || 0;
+    const recibo = propInfo ? propInfo.reciboAjustado : reciboBase;
+    const esReciboProporc = !!propInfo;
     const licInfo = enLicencia[o._id];
 
     // Si está en licencia → calcular proporción de horas fijas a descontar
@@ -4760,11 +4890,11 @@ function filtrarBanco() {
           </div>` : ''}
           ${!esLicencia && r.hsSinFichar > 0 ? `<div style="font-size:10px;color:var(--yellow);font-weight:700;margin-top:2px">⚠ ${r.hsSinFichar.toFixed(1)}hs de cobertura estimadas sin fichar</div>` : ''}
           ${!esLicencia && r.hsCoberturas > 0 && r.hsSinFichar === 0 ? `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${r.hsCoberturas.toFixed(1)}hs de cobertura fichadas</div>` : ''}
-          ${!esLicencia && r.esReciboProporc ? `<div style="font-size:10px;color:var(--yellow);margin-top:2px">📅 Alta ${r.propInfo.fechaAlta} · recibo base ${r.reciboBase}hs → proporcional ${r.recibo.toFixed(1)}hs</div>` : ''}
+          ${r.esReciboProporc ? `<div style="font-size:10px;color:var(--yellow);margin-top:2px">📅 ${r.propInfo.motivo==='ALTA'?'Alta':'Baja'} ${r.propInfo.fecha} · Recibo base ${r.reciboBase}hs → proporcional ${r.recibo.toFixed(1)}hs</div>` : ''}
         </div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:${r.esReciboProporc?'var(--yellow)':'var(--text2)'}">
           ${r.recibo.toFixed(1)}
-          ${r.esReciboProporc ? `<span style="font-size:9px;display:block;color:var(--yellow)" title="Alta ${r.propInfo.fechaAlta} · Base ${r.reciboBase}hs">✂ proporcional</span>` : ''}
+          ${r.esReciboProporc ? `<span style="font-size:9px;display:block;color:var(--yellow)">✂ ${r.propInfo.motivo==='ALTA'?'alta':'baja'} ${r.propInfo.fecha?.slice(8)}</span>` : ''}
         </div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:${esLicencia?'var(--accent)':'var(--text2)'}">
           ${esLicencia ? `${r.trabajadas.toFixed(1)}<span style="font-size:9px;display:block;color:var(--accent)">+lic</span>` : `${r.trabajadas.toFixed(1)}${r.hsSinFichar>0?'<span style="font-size:10px;color:var(--yellow)"> *</span>':''}`}
@@ -5035,17 +5165,105 @@ async function renderReporteOperario() {
       style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
     <div id="rp-op-lista"></div>`;
 
+  // Helpers proporcionales para reporte por operario (igual que banco de horas)
+  function rpContarOcurrencias(diasEsquema, fechaDesde, fechaHasta) {
+    if (!diasEsquema.length || fechaDesde > fechaHasta) return 0;
+    const DIAS_MAP = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
+    let count = 0;
+    const cur = new Date(fechaDesde + 'T12:00:00');
+    const fin = new Date(fechaHasta + 'T12:00:00');
+    while (cur <= fin) {
+      if (diasEsquema.includes(DIAS_MAP[cur.getDay()])) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }
+  function rpCalcHsPeriodo(diasEsquema, hsPorDiaMap, fechaDesde, fechaHasta, primerDia, ultimoDia) {
+    const esMesCompleto = fechaDesde <= primerDia && fechaHasta >= ultimoDia;
+    let hsTotal = 0;
+    for (const dia of diasEsquema) {
+      const hsDia = hsPorDiaMap[dia] || 0;
+      if (!hsDia) continue;
+      hsTotal += esMesCompleto ? 4 * hsDia : rpContarOcurrencias([dia], fechaDesde, fechaHasta) * hsDia;
+    }
+    return hsTotal;
+  }
+  const rpMes = mes;
+  const [rpAnio, rpNumMes] = rpMes.split('-').map(Number);
+  const rpPrimerDia = rpMes + '-01';
+  const rpUltimoDia = rpMes + '-' + String(new Date(rpAnio, rpNumMes, 0).getDate()).padStart(2,'0');
+
   window._rpOps = operarios.filter(o => o.rol === 'OPERARIO').map(o => {
-    const srvs = servicios.filter(s => normOps(s.operarios).includes(o._id));
-    const hsRecibo = Number(o.horasRecibo) || 0;
     const fichadasOp = fichadasMes.filter(f=>f.operarioId===o._id);
     const hsReales = fichadasOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
 
-    // Horas fijas
-    const hsFijas = srvs.reduce((sum,s) => {
-      const hsS = Number(s.horasPorSemana) || (Number(s.horasContratadas)||0)*(s.dias?.length||0);
-      return sum + hsS * 4;
-    }, 0);
+    // Horas fijas con cálculo proporcional por período en cada servicio
+    let hsFijas = 0;
+    const detalleServicios = [];
+
+    for (const srv of servicios) {
+      let opsRaw = srv.operarios;
+      if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
+      if (!Array.isArray(opsRaw)) opsRaw = [];
+      const opObj = opsRaw.map(x => typeof x === 'string' ? {id:x,fechaInicio:'',fechaFin:''} : x)
+                          .find(x => x.id === o._id);
+      if (!opObj) continue;
+
+      const diasEsquema = Array.isArray(srv.dias) ? srv.dias : [];
+      if (!diasEsquema.length) continue;
+
+      // Construir hsPorDiaMap
+      let hpd = {};
+      try { if (srv.horariosPorDia) hpd = typeof srv.horariosPorDia==='string'?JSON.parse(srv.horariosPorDia):srv.horariosPorDia; } catch {}
+      const hpdMap = {};
+      for (const d of diasEsquema) {
+        if (hpd[d]?.hs) hpdMap[d] = Number(hpd[d].hs);
+        else { const hs = Number(srv.horasPorSemana)||(Number(srv.horasContratadas)||0)*diasEsquema.length; hpdMap[d] = diasEsquema.length ? hs/diasEsquema.length : 0; }
+      }
+
+      // Determinar período activo del operario en este servicio
+      let fechaDesde = rpPrimerDia;
+      let fechaHasta = rpUltimoDia;
+      if (opObj.fechaInicio && opObj.fechaInicio > rpUltimoDia) continue;
+      if (opObj.fechaInicio && opObj.fechaInicio > rpPrimerDia) fechaDesde = opObj.fechaInicio;
+      if (opObj.fechaFin) {
+        if (opObj.fechaFin < rpPrimerDia) continue;
+        if (opObj.fechaFin < rpUltimoDia) fechaHasta = opObj.fechaFin;
+      }
+
+      const hsSrv = rpCalcHsPeriodo(diasEsquema, hpdMap, fechaDesde, fechaHasta, rpPrimerDia, rpUltimoDia);
+      hsFijas += hsSrv;
+
+      const esMesCompleto = fechaDesde <= rpPrimerDia && fechaHasta >= rpUltimoDia;
+      detalleServicios.push({
+        servicioId: srv._id,
+        cliente: srv.cliente || '—',
+        codigo: srv.codigo || '',
+        dias: diasEsquema,
+        hpdMap,
+        fechaDesde,
+        fechaHasta,
+        esMesCompleto,
+        hs: hsSrv,
+        esHistorico: !!opObj.fechaFin
+      });
+    }
+
+    // Recibo proporcional por alta/baja en empresa
+    const hsReciboBase = Number(o.horasRecibo) || 0;
+    let hsRecibo = hsReciboBase;
+    let propInfoRp = null;
+    if (o.fechaIngreso && o.fechaIngreso.startsWith(rpMes) && o.fechaIngreso > rpPrimerDia) {
+      const hsMesCompleto = detalleServicios.filter(d=>!d.esHistorico).reduce((s,d) => s + rpCalcHsPeriodo(d.dias, d.hpdMap, rpPrimerDia, rpUltimoDia, rpPrimerDia, rpUltimoDia), 0);
+      const hsDesde = detalleServicios.filter(d=>!d.esHistorico).reduce((s,d) => s + rpCalcHsPeriodo(d.dias, d.hpdMap, o.fechaIngreso, rpUltimoDia, rpPrimerDia, rpUltimoDia), 0);
+      if (hsMesCompleto > 0) { hsRecibo = Math.round(hsReciboBase*(hsDesde/hsMesCompleto)*10)/10; propInfoRp = {motivo:'ALTA',fecha:o.fechaIngreso,reciboBase:hsReciboBase}; }
+    } else if (o.fechaEgreso && o.fechaEgreso.startsWith(rpMes) && o.fechaEgreso < rpUltimoDia) {
+      const hsMesCompleto = detalleServicios.reduce((s,d) => s + rpCalcHsPeriodo(d.dias, d.hpdMap, rpPrimerDia, rpUltimoDia, rpPrimerDia, rpUltimoDia), 0);
+      const hsHasta = detalleServicios.reduce((s,d) => s + rpCalcHsPeriodo(d.dias, d.hpdMap, rpPrimerDia, o.fechaEgreso, rpPrimerDia, rpUltimoDia), 0);
+      if (hsMesCompleto > 0) { hsRecibo = Math.round(hsReciboBase*(hsHasta/hsMesCompleto)*10)/10; propInfoRp = {motivo:'BAJA',fecha:o.fechaEgreso,reciboBase:hsReciboBase}; }
+    }
+
+    const srvs = detalleServicios; // para compatibilidad con render existente
 
     // Coberturas donde este operario es REEMPLAZANTE en el mes
     const cobsReemplazante = coberturas.filter(cob =>
@@ -5132,7 +5350,8 @@ async function renderReporteOperario() {
     const diff = hsTotal - hsRecibo;
 
     return {
-      op: o, srvs, hsRecibo, hsFijas, hsVariables: hsReales,
+      op: o, srvs: detalleServicios, hsRecibo, hsReciboBase, propInfoRp,
+      hsFijas, hsVariables: hsReales,
       hsCobTotal, hsCobSinFichar, detalleCoberturas,
       hsTotal, diff
     };
@@ -5176,7 +5395,10 @@ function filtrarRepOp() {
         </div>
         <div style="text-align:right">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Recibo</div>
-          <div style="font-family:var(--font-display);font-size:22px;font-weight:900;color:var(--accent)">${hsRecibo}hs</div>
+          <div style="font-family:var(--font-display);font-size:22px;font-weight:900;color:${r.propInfoRp?'var(--yellow)':'var(--accent)'}">
+            ${hsRecibo}hs
+            ${r.propInfoRp ? `<div style="font-size:10px;color:var(--yellow);font-weight:600">✂ ${r.propInfoRp.motivo==='ALTA'?'Alta':'Baja'} ${r.propInfoRp.fecha?.slice(8)} · base ${r.propInfoRp.reciboBase}hs</div>` : ''}
+          </div>
         </div>
       </div>
 
@@ -5241,10 +5463,22 @@ function filtrarRepOp() {
       <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">
         Servicios fijos (${r.srvs.length})
       </div>
-      ${r.srvs.map(s=>`<div style="font-size:12px;color:var(--text2);padding:5px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
-        <span>🏢 ${(s.cliente||'').replace(/'/g,'&#39;')} · ${(s.dias||[]).join('-')} · ${s.horaInicio||''}–${s.horaFin||''}</span>
-        <span style="font-weight:700;color:var(--accent);white-space:nowrap;margin-left:8px">${((Number(s.horasPorSemana)||(Number(s.horasContratadas)||0)*(s.dias?.length||0))*4).toFixed(0)}hs/mes</span>
-      </div>`).join('')}
+      ${r.srvs.map(s=>{
+        const periodoLabel = s.esMesCompleto
+          ? '<span style="font-size:9px;color:var(--text3)">mes completo · 4 sem</span>'
+          : '<span style="font-size:9px;color:var(--yellow)">📅 ' + (s.fechaDesde?.slice(8)||'01') + ' → ' + (s.fechaHasta?.slice(8)||'fin') + ' · proporcional' + (s.esHistorico?' · <em>histórico</em>':'') + '</span>';
+        const colorRow = s.esHistorico ? 'var(--text3)' : 'var(--text2)';
+        const opacityRow = s.esHistorico ? '0.7' : '1';
+        const iconoSrv = s.esHistorico ? '🗂' : '🏢';
+        const colorHs = s.esHistorico ? 'var(--text3)' : 'var(--accent)';
+        return '<div style="font-size:12px;color:' + colorRow + ';padding:5px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:6px;opacity:' + opacityRow + '">'
+          + '<div>'
+          + '<span>' + iconoSrv + ' ' + (s.cliente||'').replace(/'/g,"'") + ' · ' + (s.dias||[]).join('-') + '</span>'
+          + '<div style="margin-top:1px">' + periodoLabel + '</div>'
+          + '</div>'
+          + '<span style="font-weight:700;color:' + colorHs + ';white-space:nowrap">' + s.hs.toFixed(1) + 'hs</span>'
+          + '</div>';
+      }).join('')}
       ` : `<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicios fijos asignados</div>`}
     </div>`;
   }).join('');
