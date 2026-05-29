@@ -2083,7 +2083,7 @@ async function modalServicio(id = null) {
           <label>Zona logística</label>
           <select id="sv-zona" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none">
             <option value="">— Sin asignar —</option>
-            ${['CENTRO','NUEVA CORDOBA','GENERAL PAZ','ALTA CORDOBA','NORTE','OESTE','SUR','INTER FABRICA - ESTE','VILLA ALLENDE','CARLOS PAZ','INTERNA','SIN INSUMOS'].map(z => `<option value="${z}" ${(s.zona||'')=== z ?'selected':''}>${z}</option>`).join('')}
+            ${['CENTRO','NUEVA CORDOBA','GENERAL PAZ','ALTA CORDOBA','NORTE','OESTE','SUR','INTER FABRICA - ESTE','VILLA ALLENDE','CARLOS PAZ','INTERNA','SIN INSUMOS','DESINFECCION'].map(z => `<option value="${z}" ${(s.zona||'')=== z ?'selected':''}>${z}</option>`).join('')}
           </select>
         </div>
 
@@ -6383,7 +6383,7 @@ async function renderReporteAusentismo() {
 //  MÓDULO: LOGÍSTICA
 // ════════════════════════════════════════════
 
-const ZONAS_LOGISTICA = ['CENTRO','NUEVA CORDOBA','GENERAL PAZ','ALTA CORDOBA','NORTE','OESTE','SUR','INTER FABRICA - ESTE','VILLA ALLENDE','CARLOS PAZ','INTERNA','SIN INSUMOS'];
+const ZONAS_LOGISTICA = ['CENTRO','NUEVA CORDOBA','GENERAL PAZ','ALTA CORDOBA','NORTE','OESTE','SUR','INTER FABRICA - ESTE','VILLA ALLENDE','CARLOS PAZ','INTERNA','SIN INSUMOS','DESINFECCION'];
 
 async function renderLogistica() {
   const sc = document.getElementById('main-content');
@@ -6406,8 +6406,9 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
   const esAdmin = currentUser.rol === 'ADMIN';
 
   // Separar sin insumos vs con insumos
-  const conInsumos  = servicios.filter(s => s.zona !== 'SIN INSUMOS' && s.zona !== 'INTERNA' && s.zona);
+  const conInsumos  = servicios.filter(s => s.zona !== 'SIN INSUMOS' && s.zona !== 'INTERNA' && s.zona !== 'DESINFECCION' && s.zona);
   const sinInsumos  = servicios.filter(s => s.zona === 'SIN INSUMOS');
+  const desinfeccion = servicios.filter(s => s.zona === 'DESINFECCION');
   const sinZona     = servicios.filter(s => !s.zona);
 
   // Deduplicar por nombre (mismo servicio puede tener varios docs por operario)
@@ -6421,8 +6422,9 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
     });
   }
 
-  const conInsumosDed = dedup(conInsumos);
-  const sinInsumosDed = dedup(sinInsumos);
+  const conInsumosDed  = dedup(conInsumos);
+  const sinInsumosDed  = dedup(sinInsumos);
+  const desinfeccionDed = dedup(desinfeccion);
 
   // Filtrar por zona
   const lista = zonaFiltro === 'TODAS'
@@ -6523,6 +6525,53 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
                 ${s.direccion?`<div style="font-size:11px;color:var(--text3)">${s.direccion}</div>`:''}
               </div>
             </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+      <!-- Sección DESINFECCIÓN -->
+      ${desinfeccionDed.length > 0 ? `
+      <div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">🧪</span>
+            <span style="font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent)">Desinfección mensual</span>
+          </div>
+          <span style="font-size:12px;color:var(--text3);font-weight:600">
+            ${desinfeccionDed.filter(s=>entregasMap[s._id]).length}/${desinfeccionDed.length} realizados
+          </span>
+        </div>
+        <!-- Barra progreso desinfección -->
+        <div style="background:var(--border);border-radius:6px;height:6px;margin-bottom:10px;overflow:hidden">
+          <div style="background:var(--accent);height:100%;border-radius:6px;transition:width .4s;width:${desinfeccionDed.length > 0 ? Math.round(desinfeccionDed.filter(s=>entregasMap[s._id]).length / desinfeccionDed.length * 100) : 0}%"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${desinfeccionDed.sort((a,b) => {
+            const ae = entregasMap[a._id] ? 1 : 0;
+            const be = entregasMap[b._id] ? 1 : 0;
+            return ae - be || (a.cliente||'').localeCompare(b.cliente||'');
+          }).map(s => {
+            const ent = entregasMap[s._id];
+            const borderColor = ent ? 'rgba(26,143,203,.3)' : 'var(--border)';
+            const opacityVal = ent ? '.75' : '1';
+            const circleBorder = ent ? 'var(--accent)' : 'var(--border)';
+            const circleBg = ent ? 'var(--accent)' : 'transparent';
+            const tachado = ent ? 'text-decoration:line-through;color:var(--text3)' : '';
+            const tagBg = ent ? 'var(--accent-light)' : 'var(--surface2)';
+            const tagColor = ent ? 'var(--accent)' : 'var(--text3)';
+            const clienteEsc = (s.cliente||'').replace(/'/g, "\'");
+            return '<div style="background:var(--surface);border:1px solid ' + borderColor + ';border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;opacity:' + opacityVal + '">'
+              + '<div onclick="logisticaToggle(&#39;' + s._id + '&#39;,&#39;' + clienteEsc + '&#39;,&#39;' + mes + '&#39;)" '
+              + 'style="width:28px;height:28px;border-radius:50%;border:2px solid ' + circleBorder + ';background:' + circleBg + ';display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .2s">'
+              + (ent ? '<span style="color:#fff;font-size:14px">✓</span>' : '')
+              + '</div>'
+              + '<div style="flex:1;min-width:0">'
+              + '<div style="font-size:14px;font-weight:600;' + tachado + '">' + (s.cliente||'—') + '</div>'
+              + (s.direccion ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">📍 ' + s.direccion + '</div>' : '')
+              + (ent ? '<div style="font-size:11px;color:var(--accent);margin-top:2px">✓ Realizado ' + ent.fecha + '</div>' : '')
+              + '</div>'
+              + '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:' + tagBg + ';color:' + tagColor + ';white-space:nowrap">🧪 DESINFEC.</span>'
+              + '</div>';
+          }).join('')}
         </div>
       </div>` : ''}
 
