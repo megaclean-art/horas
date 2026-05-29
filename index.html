@@ -1175,8 +1175,10 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
     fichadaHtml = `<div class="fichada-info">
       ${tieneEntrada ? `<div class="fichada-row"><span>Entrada:</span><span class="val">${fichada.entrada}</span></div>` : ''}
       ${tieneSalida ? `<div class="fichada-row"><span>Salida:</span><span class="val">${fichada.salida}${desvioStr}</span></div>` : ''}
-      ${tieneSalida ? `<div class="fichada-row"><span>Horas trabajadas:</span><span class="val">${diffHoras(fichada.entrada, fichada.salida).toFixed(1)}hs</span></div>` : ''}
+      ${tieneSalida ? `<div class="fichada-row"><span>Horas trabajadas:</span><span class="val">${(fichada.horasTrabajadas||diffHoras(fichada.entrada, fichada.salida)).toFixed(1)}hs${fichada.horasReales && fichada.horasReales !== fichada.horasTrabajadas ? ` <span style="font-size:10px;color:var(--text3)">(real: ${fichada.horasReales.toFixed(1)}hs)</span>` : ''}</span></div>` : ''}
       <div class="fichada-row"><span>GPS entrada:</span><span class="val ${fichada.gpsOk ? 'gps-ok' : 'gps-warn'}">${fichada.gpsOk ? '✓ OK' : '⚠ Fuera de rango'} ${fichada.distanciaEntrada ? Math.round(fichada.distanciaEntrada)+'m' : ''}</span></div>
+      ${tieneSalida ? `<div class="fichada-row"><span>GPS salida:</span><span class="val ${fichada.gpsOkSalida !== false ? 'gps-ok' : 'gps-warn'}">${fichada.gpsOkSalida !== false ? '✓ OK' : '⚠ Fuera de rango'} ${fichada.distanciaSalida ? Math.round(fichada.distanciaSalida)+'m' : ''}</span></div>` : ''}
+      ${fichada.alertaGpsSalida ? `<div style="background:rgba(214,61,74,.06);border:1px solid rgba(214,61,74,.25);border-radius:6px;padding:8px;margin-top:6px;font-size:12px;color:var(--red)">⚠ Salida marcada fuera del rango GPS del servicio.</div>` : ''}
       ${fichada.alertaDesvio ? `<div style="background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.35);border-radius:6px;padding:8px;margin-top:6px;font-size:12px;color:var(--yellow)">⚠ Desvío de horario registrado — el supervisor fue notificado.</div>` : ''}
     </div>`;
   }
@@ -1292,12 +1294,33 @@ async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horas
 
   const estaOnline = navigator.onLine;
 
+  // ── FIX 1: Validar GPS en salida ──
+  const pos = await getGPS();
+  let gpsOkSalida = true, distanciaSalida = 0, latSalida = 0, lonSalida = 0;
+  let alertaGpsSalida = false;
+  if (pos) {
+    latSalida = pos.coords.latitude;
+    lonSalida = pos.coords.longitude;
+    // Buscar coordenadas del servicio
+    let srvCoords = null;
+    if (estaOnline) {
+      try { srvCoords = await fsGet('horas_servicios', servicioId); } catch {}
+    } else {
+      const cached = offlineLoadServicios();
+      srvCoords = (cached?.servicios||[]).find(s => s._id === servicioId);
+    }
+    if (srvCoords && srvCoords.lat && srvCoords.lon) {
+      distanciaSalida = distanciaMetros(latSalida, lonSalida, Number(srvCoords.lat), Number(srvCoords.lon));
+      gpsOkSalida = distanciaSalida <= (srvCoords.radioGps || 300);
+      if (!gpsOkSalida) alertaGpsSalida = true;
+    }
+  }
+
   // Buscar entrada: primero en Firestore (online) o en caché local (offline)
   let fichada = null;
   if (estaOnline) {
     fichada = await fsGet('horas_fichadas', id);
   } else {
-    // Buscar en caché local de fichadas de hoy o en pendientes
     const fichadasHoy = offlineLoadFichadasHoy();
     fichada = fichadasHoy.find(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy()));
     if (!fichada) {
@@ -1310,50 +1333,68 @@ async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horas
   if (!fichada || !fichada.entrada) return toast('No hay entrada registrada', 'error');
 
   const salida = horaActual();
-  const horas = diffHoras(fichada.entrada, salida);
+  const horasReales = diffHoras(fichada.entrada, salida);
   const tope = horasContratadas + horasExtra;
-  const desvioHoras = tope > 0 ? Math.round((horas - tope) * 100) / 100 : 0;
   const UMBRAL_DESVIO = 0.25;
+
+  // ── FIX 2: Tope de horas contratadas ──
+  // Si trabajó MÁS del tope → guardar el tope, registrar desvío positivo
+  // Si trabajó MENOS → guardar las horas reales, registrar desvío negativo
+  const horasTrabajadas = (tope > 0 && horasReales > tope) ? tope : horasReales;
+  const desvioHoras = tope > 0 ? Math.round((horasReales - tope) * 100) / 100 : 0;
   const hayDesvio = tope > 0 && Math.abs(desvioHoras) >= UMBRAL_DESVIO;
 
   const dataSalida = {
     salida,
-    horasTrabajadas: horas,
+    horasTrabajadas,          // tope si excedió, real si no llegó
+    horasReales,              // siempre las horas reales para referencia
     bloqueadoHorasExtra: false,
     estado: 'completo',
     desvioHoras: tope > 0 ? desvioHoras : 0,
-    alertaDesvio: hayDesvio
+    alertaDesvio: hayDesvio,
+    gpsOkSalida,
+    distanciaSalida,
+    latSalida: String(latSalida),
+    lonSalida: String(lonSalida),
+    alertaGpsSalida
   };
 
+  // Construir mensaje de toast
+  function buildToastSalida() {
+    const msgs = [];
+    if (alertaGpsSalida) {
+      msgs.push(`⚠ GPS: estás a ${Math.round(distanciaSalida)}m del servicio`);
+    }
+    if (hayDesvio) {
+      const signo = desvioHoras > 0 ? '+' : '';
+      const tipoD = desvioHoras > 0 ? 'extra' : 'anticipada';
+      msgs.push(`⚠ Salida ${tipoD} — real ${horasReales.toFixed(1)}hs, registrado ${horasTrabajadas.toFixed(1)}hs (${signo}${desvioHoras.toFixed(1)}hs)`);
+    } else {
+      msgs.push(`✓ Salida registrada — ${horasTrabajadas.toFixed(1)}hs en ${clienteNombre}`);
+    }
+    return msgs.join(' · ');
+  }
+
   if (!estaOnline) {
-    // Actualizar pendiente existente o crear nuevo con datos completos
     const pendientes = offlineGetPendientes();
     const pendExistente = pendientes.find(p => p.id === id);
     const dataCompleta = pendExistente
       ? { ...pendExistente.data, ...dataSalida }
       : { ...fichada, ...dataSalida };
     offlineAddPendiente({ id, data: dataCompleta, tipo: 'salida', ts: Date.now() });
-    // Actualizar caché local
     const fichadasHoy = offlineLoadFichadasHoy();
     const existente = fichadasHoy.findIndex(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy()));
     if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...dataSalida, _offline: true };
     offlineSaveFichadasHoy(fichadasHoy);
     actualizarBannerOffline();
-    toast(`📡 Sin conexión — salida guardada localmente (${horas.toFixed(1)}hs)`, 'warn');
+    toast(`📡 Sin conexión — salida guardada localmente (${horasTrabajadas.toFixed(1)}hs)`, 'warn');
   } else {
     await fsSave('horas_fichadas', id, dataSalida);
-    // Actualizar caché offline
     const fichadasHoy = offlineLoadFichadasHoy();
     const existente = fichadasHoy.findIndex(f => f._id === id);
     if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...dataSalida };
     offlineSaveFichadasHoy(fichadasHoy);
-    if (hayDesvio) {
-      const signo = desvioHoras > 0 ? '+' : '';
-      const tipo = desvioHoras > 0 ? 'extra' : 'anticipada';
-      toast(`⚠ Salida ${tipo} — ${horas.toFixed(1)}hs trabajadas (${signo}${desvioHoras.toFixed(1)}hs respecto al contrato)`, 'warn');
-    } else {
-      toast(`✓ Salida registrada — ${horas.toFixed(1)}hs en ${clienteNombre}`, 'ok');
-    }
+    toast(buildToastSalida(), alertaGpsSalida || hayDesvio ? 'warn' : 'ok');
   }
   await cargarServiciosHoy();
 }
