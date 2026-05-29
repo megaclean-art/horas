@@ -483,6 +483,135 @@ async function fsGet(col, id) {
   return fromFS(await r.json());
 }
 
+// ════════════════════════════════════════════
+//  OFFLINE SUPPORT
+// ════════════════════════════════════════════
+const OFFLINE_SERVICIOS_KEY = 'mc_offline_servicios';
+const OFFLINE_FICHADAS_KEY  = 'mc_offline_fichadas';  // fichadas pendientes de subir
+const OFFLINE_FICH_HOY_KEY  = 'mc_offline_fichhoy';   // fichadas de hoy cacheadas
+
+// Guardar datos para uso offline
+function offlineSaveServicios(servicios, coberturas) {
+  try {
+    localStorage.setItem(OFFLINE_SERVICIOS_KEY, JSON.stringify({
+      servicios, coberturas,
+      fecha: isoHoy(),
+      userId: currentUser?._id
+    }));
+  } catch(e) { console.warn('offline save err:', e); }
+}
+
+function offlineLoadServicios() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_SERVICIOS_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    // Solo válido para hoy y para el mismo usuario
+    if (data.fecha !== isoHoy() || data.userId !== currentUser?._id) return null;
+    return data;
+  } catch { return null; }
+}
+
+function offlineSaveFichadasHoy(fichadas) {
+  try {
+    localStorage.setItem(OFFLINE_FICH_HOY_KEY, JSON.stringify({
+      fichadas, fecha: isoHoy(), userId: currentUser?._id
+    }));
+  } catch(e) {}
+}
+
+function offlineLoadFichadasHoy() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_FICH_HOY_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (data.fecha !== isoHoy() || data.userId !== currentUser?._id) return [];
+    return data.fichadas || [];
+  } catch { return []; }
+}
+
+// Cola de fichadas pendientes (entrada o salida que no pudo subirse)
+function offlineGetPendientes() {
+  try { return JSON.parse(localStorage.getItem(OFFLINE_FICHADAS_KEY) || '[]'); } catch { return []; }
+}
+
+function offlineAddPendiente(item) {
+  const pendientes = offlineGetPendientes();
+  // Reemplazar si ya existe mismo id
+  const idx = pendientes.findIndex(p => p.id === item.id);
+  if (idx >= 0) pendientes[idx] = item; else pendientes.push(item);
+  localStorage.setItem(OFFLINE_FICHADAS_KEY, JSON.stringify(pendientes));
+}
+
+function offlineRemovePendiente(id) {
+  const pendientes = offlineGetPendientes().filter(p => p.id !== id);
+  localStorage.setItem(OFFLINE_FICHADAS_KEY, JSON.stringify(pendientes));
+}
+
+// Sincronizar fichadas pendientes con Firestore
+async function sincronizarPendientes() {
+  if (!navigator.onLine) return;
+  const pendientes = offlineGetPendientes();
+  if (!pendientes.length) return;
+
+  let sincronizados = 0;
+  for (const p of pendientes) {
+    try {
+      const ok = await fsSave('horas_fichadas', p.id, p.data);
+      if (ok) { offlineRemovePendiente(p.id); sincronizados++; }
+    } catch(e) { console.warn('sync err:', p.id, e); }
+  }
+
+  if (sincronizados > 0) {
+    // Refrescar datos en pantalla si estamos en fichar
+    invalidarCache('horas_fichadas');
+    offlineSaveFichadasHoy([]); // limpiar caché local de fichadas
+    toast(`✓ ${sincronizados} fichada${sincronizados>1?'s':''} sincronizada${sincronizados>1?'s':''} con el servidor`, 'ok');
+    actualizarBannerOffline();
+    // Si el operario está en la pantalla de fichar, recargar
+    if (document.getElementById('servicios-hoy')) await cargarServiciosHoy();
+  }
+}
+
+// Banner de estado offline/pendientes
+function actualizarBannerOffline() {
+  let banner = document.getElementById('banner-offline');
+  const pendientes = offlineGetPendientes();
+  const isOnline = navigator.onLine;
+
+  if (isOnline && pendientes.length === 0) {
+    if (banner) banner.remove();
+    return;
+  }
+
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'banner-offline';
+    banner.style.cssText = 'position:fixed;top:58px;left:0;right:0;z-index:500;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;font-weight:600;transition:all .3s';
+    document.body.appendChild(banner);
+  }
+
+  if (!isOnline) {
+    banner.style.background = '#d63d4a';
+    banner.style.color = '#fff';
+    banner.innerHTML = '<span>📡 Sin conexión — las fichadas se guardan localmente</span>';
+  } else if (pendientes.length > 0) {
+    banner.style.background = '#e07b2a';
+    banner.style.color = '#fff';
+    banner.innerHTML = '<span>⏳ ' + pendientes.length + ' fichada' + (pendientes.length>1?'s':'') + ' pendiente' + (pendientes.length>1?'s':'') + ' de sincronizar</span>'
+      + '<button onclick="sincronizarPendientes()" style="background:#fff;color:#e07b2a;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer">↑ Subir ahora</button>';
+  }
+}
+
+// Listeners de conexión
+window.addEventListener('online', () => {
+  actualizarBannerOffline();
+  sincronizarPendientes();
+});
+window.addEventListener('offline', () => {
+  actualizarBannerOffline();
+});
+
 // Cache con TTL diferenciado por colección
 const _fsCache = {};
 const _fsCacheTime = {};
@@ -586,12 +715,35 @@ function invalidarCache(col) {
 // para que las pantallas las encuentren ya en caché
 async function prefetchColecciones() {
   try {
-    await Promise.all([
+    const [usuarios, servicios, fichadas, coberturas] = await Promise.all([
       fsList('horas_usuarios'),
       fsList('horas_servicios'),
       fsList('horas_fichadas'),
+      fsList('horas_coberturas'),
     ]);
+    // Si el usuario es OPERARIO, guardar sus datos para uso offline
+    if (currentUser?.rol === 'OPERARIO') {
+      const diaStr = DIAS_SEMANA[diasHoy()];
+      const hoy = isoHoy();
+      const misSrvs = servicios.filter(s => {
+        const ids = normOps(s.operarios);
+        return (s.dias||[]).includes(diaStr) && ids.includes(currentUser._id);
+      });
+      const misCobs = coberturas.filter(c =>
+        c.reemplazanteId === currentUser._id &&
+        c.estado === 'ACTIVA' &&
+        c.fechaInicio <= hoy &&
+        (!c.fechaFin || c.fechaFin >= hoy)
+      );
+      offlineSaveServicios(misSrvs, misCobs);
+      // Cachear fichadas de hoy
+      const fichadasHoy = fichadas.filter(f => f.operarioId === currentUser._id && f.fecha === hoy);
+      offlineSaveFichadasHoy(fichadasHoy);
+    }
   } catch(e) { /* silencioso, no bloquear login */ }
+  // Verificar pendientes al iniciar
+  actualizarBannerOffline();
+  if (navigator.onLine) sincronizarPendientes();
 }
 
 async function fsSave(col, id, data) {
@@ -923,27 +1075,49 @@ async function renderFichar() {
   }, 1000);
   document.getElementById('reloj-live').textContent = horaCompleta();
 
+  actualizarBannerOffline();
   await cargarServiciosHoy();
 }
 
 async function cargarServiciosHoy() {
-  const servicios = await fsList('horas_servicios');
-  const diaIdx = diasHoy();
-  const diaStr = DIAS_SEMANA[diaIdx];
+  const estaOnline = navigator.onLine;
+  let serviciosHoy = [];
+  let coberturasHoy = [];
+  let fichadasHoy = [];
 
-  // Servicios fijos asignados
-  const serviciosHoy = servicios.filter(s => {
-    const dias = s.dias || [];
-    const operariosIds = normOps(s.operarios);
-    return dias.includes(diaStr) && (operariosIds.includes(currentUser._id) || operariosIds.includes(String(currentUser._id)));
-  });
-
-  // Coberturas activas de hoy
-  const coberturasHoy = await cargarCoberturasHoy();
-
-  // Cargar fichadas de hoy
-  const todasFichadas = await fsList('horas_fichadas');
-  const fichadasHoy = todasFichadas.filter(f => f.operarioId === currentUser._id && f.fecha === isoHoy());
+  if (!estaOnline) {
+    // ── MODO OFFLINE: usar datos cacheados en localStorage ──
+    const cached = offlineLoadServicios();
+    if (cached) {
+      serviciosHoy = cached.servicios || [];
+      coberturasHoy = cached.coberturas || [];
+    }
+    // Fichadas: combinar caché local + pendientes offline
+    fichadasHoy = offlineLoadFichadasHoy();
+    // Agregar pendientes offline como fichadas locales para mostrar estado correcto
+    const pendientes = offlineGetPendientes();
+    for (const p of pendientes) {
+      const existente = fichadasHoy.findIndex(f => f._id === p.id || (f.servicioId === p.data.servicioId && f.fecha === p.data.fecha));
+      const fichadaLocal = { ...p.data, _id: p.id, _offline: true };
+      if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...fichadaLocal };
+      else fichadasHoy.push(fichadaLocal);
+    }
+  } else {
+    // ── MODO ONLINE: cargar desde Firestore ──
+    const servicios = await fsList('horas_servicios');
+    const diaStr = DIAS_SEMANA[diasHoy()];
+    serviciosHoy = servicios.filter(s => {
+      const dias = s.dias || [];
+      const operariosIds = normOps(s.operarios);
+      return dias.includes(diaStr) && (operariosIds.includes(currentUser._id) || operariosIds.includes(String(currentUser._id)));
+    });
+    coberturasHoy = await cargarCoberturasHoy();
+    const todasFichadas = await fsList('horas_fichadas');
+    fichadasHoy = todasFichadas.filter(f => f.operarioId === currentUser._id && f.fecha === isoHoy());
+    // Actualizar caché offline con datos frescos
+    offlineSaveServicios(serviciosHoy, coberturasHoy);
+    offlineSaveFichadasHoy(fichadasHoy);
+  }
 
   const cont = document.getElementById('servicios-hoy');
   if (!cont) return;
@@ -1007,9 +1181,10 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
     </div>`;
   }
 
+  const esOffline = fichada?._offline;
   let estado = tieneSalida
-    ? (fichada?.alertaDesvio ? `<span class="pill pill-yellow">⚠ Desvío</span>` : `<span class="pill pill-green">✓ Completado</span>`)
-    : enCurso ? `<span class="pill pill-yellow">En curso</span>`
+    ? (esOffline ? `<span class="pill pill-yellow">📡 Guardado local</span>` : (fichada?.alertaDesvio ? `<span class="pill pill-yellow">⚠ Desvío</span>` : `<span class="pill pill-green">✓ Completado</span>`))
+    : enCurso ? (esOffline ? `<span class="pill pill-yellow">📡 En curso (offline)</span>` : `<span class="pill pill-yellow">En curso</span>`)
     : `<span class="pill pill-gray">Pendiente</span>`;
 
   const cobTag = esCobertura ? `<span class="pill pill-blue" style="font-size:10px;margin-left:4px">${s._motivo||'Cobertura'}</span>` : '';
@@ -1037,15 +1212,29 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
 
 async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '') {
   const pos = await getGPS();
-  const servicio = await fsGet('horas_servicios', servicioId);
   let gpsOk = true, distancia = 0, lat = 0, lon = 0;
+  const estaOnline = navigator.onLine;
 
   if (pos) {
     lat = pos.coords.latitude;
     lon = pos.coords.longitude;
-    if (servicio && servicio.lat && servicio.lon) {
-      distancia = distanciaMetros(lat, lon, Number(servicio.lat), Number(servicio.lon));
-      gpsOk = distancia <= (servicio.radioGps || 300);
+    // Intentar obtener servicio para validar GPS (solo online)
+    if (estaOnline) {
+      try {
+        const servicio = await fsGet('horas_servicios', servicioId);
+        if (servicio && servicio.lat && servicio.lon) {
+          distancia = distanciaMetros(lat, lon, Number(servicio.lat), Number(servicio.lon));
+          gpsOk = distancia <= (servicio.radioGps || 300);
+        }
+      } catch {}
+    } else {
+      // Offline: buscar en caché local
+      const cached = offlineLoadServicios();
+      const srv = (cached?.servicios||[]).find(s => s._id === servicioId);
+      if (srv && srv.lat && srv.lon) {
+        distancia = distanciaMetros(lat, lon, Number(srv.lat), Number(srv.lon));
+        gpsOk = distancia <= (srv.radioGps || 300);
+      }
     }
   }
 
@@ -1053,7 +1242,7 @@ async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '') {
     ? `${currentUser._id}_cob_${coberturaId}_${isoHoy()}`
     : `${currentUser._id}_${servicioId}_${isoHoy()}`;
 
-  await fsSave('horas_fichadas', id, {
+  const data = {
     operarioId: currentUser._id,
     operarioNombre: currentUser.nombre,
     servicioId,
@@ -1070,9 +1259,29 @@ async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '') {
     bloqueadoHorasExtra: false,
     estado: 'en-curso',
     tipoFichada: coberturaId ? 'COBERTURA' : 'FIJO'
-  });
+  };
 
-  toast(gpsOk ? `✓ Entrada registrada — ${clienteNombre}` : `⚠ Entrada marcada fuera de rango GPS`, gpsOk ? 'ok' : 'warn');
+  if (!estaOnline) {
+    // Guardar en cola offline
+    offlineAddPendiente({ id, data, tipo: 'entrada', ts: Date.now() });
+    // Actualizar caché local de fichadas de hoy
+    const fichadasHoy = offlineLoadFichadasHoy();
+    const existente = fichadasHoy.findIndex(f => f._id === id);
+    if (existente >= 0) fichadasHoy[existente] = { ...data, _id: id, _offline: true };
+    else fichadasHoy.push({ ...data, _id: id, _offline: true });
+    offlineSaveFichadasHoy(fichadasHoy);
+    actualizarBannerOffline();
+    toast(`📡 Sin conexión — entrada guardada localmente`, 'warn');
+  } else {
+    await fsSave('horas_fichadas', id, data);
+    // Actualizar caché offline con la fichada ya subida
+    const fichadasHoy = offlineLoadFichadasHoy();
+    const existente = fichadasHoy.findIndex(f => f._id === id);
+    if (existente >= 0) fichadasHoy[existente] = { ...data, _id: id };
+    else fichadasHoy.push({ ...data, _id: id });
+    offlineSaveFichadasHoy(fichadasHoy);
+    toast(gpsOk ? `✓ Entrada registrada — ${clienteNombre}` : `⚠ Entrada marcada fuera de rango GPS`, gpsOk ? 'ok' : 'warn');
+  }
   await cargarServiciosHoy();
 }
 
@@ -1081,33 +1290,70 @@ async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horas
     ? `${currentUser._id}_cob_${coberturaId}_${isoHoy()}`
     : `${currentUser._id}_${servicioId}_${isoHoy()}`;
 
-  const fichada = await fsGet('horas_fichadas', id);
+  const estaOnline = navigator.onLine;
+
+  // Buscar entrada: primero en Firestore (online) o en caché local (offline)
+  let fichada = null;
+  if (estaOnline) {
+    fichada = await fsGet('horas_fichadas', id);
+  } else {
+    // Buscar en caché local de fichadas de hoy o en pendientes
+    const fichadasHoy = offlineLoadFichadasHoy();
+    fichada = fichadasHoy.find(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy()));
+    if (!fichada) {
+      const pendientes = offlineGetPendientes();
+      const pend = pendientes.find(p => p.id === id);
+      if (pend) fichada = { ...pend.data, _id: id };
+    }
+  }
+
   if (!fichada || !fichada.entrada) return toast('No hay entrada registrada', 'error');
 
   const salida = horaActual();
   const horas = diffHoras(fichada.entrada, salida);
   const tope = horasContratadas + horasExtra;
-
-  // Calcular desvío respecto a horas contratadas (sin bloquear)
   const desvioHoras = tope > 0 ? Math.round((horas - tope) * 100) / 100 : 0;
-  const UMBRAL_DESVIO = 0.25; // 15 minutos
+  const UMBRAL_DESVIO = 0.25;
   const hayDesvio = tope > 0 && Math.abs(desvioHoras) >= UMBRAL_DESVIO;
 
-  await fsSave('horas_fichadas', id, {
+  const dataSalida = {
     salida,
     horasTrabajadas: horas,
     bloqueadoHorasExtra: false,
     estado: 'completo',
     desvioHoras: tope > 0 ? desvioHoras : 0,
     alertaDesvio: hayDesvio
-  });
+  };
 
-  if (hayDesvio) {
-    const signo = desvioHoras > 0 ? '+' : '';
-    const tipo = desvioHoras > 0 ? 'extra' : 'anticipada';
-    toast(`⚠ Salida ${tipo} — ${horas.toFixed(1)}hs trabajadas (${signo}${desvioHoras.toFixed(1)}hs respecto al contrato)`, 'warn');
+  if (!estaOnline) {
+    // Actualizar pendiente existente o crear nuevo con datos completos
+    const pendientes = offlineGetPendientes();
+    const pendExistente = pendientes.find(p => p.id === id);
+    const dataCompleta = pendExistente
+      ? { ...pendExistente.data, ...dataSalida }
+      : { ...fichada, ...dataSalida };
+    offlineAddPendiente({ id, data: dataCompleta, tipo: 'salida', ts: Date.now() });
+    // Actualizar caché local
+    const fichadasHoy = offlineLoadFichadasHoy();
+    const existente = fichadasHoy.findIndex(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy()));
+    if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...dataSalida, _offline: true };
+    offlineSaveFichadasHoy(fichadasHoy);
+    actualizarBannerOffline();
+    toast(`📡 Sin conexión — salida guardada localmente (${horas.toFixed(1)}hs)`, 'warn');
   } else {
-    toast(`✓ Salida registrada — ${horas.toFixed(1)}hs en ${clienteNombre}`, 'ok');
+    await fsSave('horas_fichadas', id, dataSalida);
+    // Actualizar caché offline
+    const fichadasHoy = offlineLoadFichadasHoy();
+    const existente = fichadasHoy.findIndex(f => f._id === id);
+    if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...dataSalida };
+    offlineSaveFichadasHoy(fichadasHoy);
+    if (hayDesvio) {
+      const signo = desvioHoras > 0 ? '+' : '';
+      const tipo = desvioHoras > 0 ? 'extra' : 'anticipada';
+      toast(`⚠ Salida ${tipo} — ${horas.toFixed(1)}hs trabajadas (${signo}${desvioHoras.toFixed(1)}hs respecto al contrato)`, 'warn');
+    } else {
+      toast(`✓ Salida registrada — ${horas.toFixed(1)}hs en ${clienteNombre}`, 'ok');
+    }
   }
   await cargarServiciosHoy();
 }
@@ -2305,25 +2551,140 @@ async function eliminarServicio(id, nombre) {
 async function renderFichadasAdmin() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Fichadas</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
-  const fichadas = await fsList('horas_fichadas');
+
+  const [fichadas, usuarios, servicios] = await Promise.all([
+    fsList('horas_fichadas'), fsList('horas_usuarios'), fsList('horas_servicios')
+  ]);
+
+  // Guardar todo para filtrado posterior
+  window._fichadasTodas = fichadas;
+  window._fichadasUsuarios = usuarios.filter(u => u.rol === 'OPERARIO').sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  window._fichadasServicios = servicios.sort((a,b)=>(a.cliente||'').localeCompare(b.cliente||''));
+
+  // Meses disponibles (desde los datos reales)
+  const mesesDisp = [...new Set(fichadas.map(f=>f.fecha?.slice(0,7)).filter(Boolean))].sort().reverse();
   const mesActual = isoHoy().slice(0,7);
-  const fichadasMes = fichadas.filter(f => f.fecha && f.fecha.startsWith(mesActual));
+  if (!mesesDisp.includes(mesActual)) mesesDisp.unshift(mesActual);
 
   c.innerHTML = `
-    <div class="section-title">Fichadas</div>
-    <div class="section-sub">${fichadasMes.length} registros este mes · <button class="btn-secondary" style="padding:6px 14px;font-size:13px" onclick="exportarExcel()">⬇ EXPORTAR EXCEL</button></div>
-    <div class="card-section">
-      ${fichadasMes.length === 0 ? '<div style="color:var(--text3);text-align:center;padding:16px">Sin fichadas este mes</div>' :
-        fichadasMes.sort((a,b)=>b.fecha.localeCompare(a.fecha)||b.entrada?.localeCompare(a.entrada||'')).map(f => `
-          <div class="list-item">
-            <div class="list-item-info">
-              <div class="list-item-name">${f.operarioNombre || '—'} → ${f.clienteNombre || '—'}</div>
-              <div class="list-item-sub">${f.fecha} · Entrada: ${f.entrada||'?'} · Salida: ${f.salida||'pendiente'} · ${f.horasTrabajadas ? f.horasTrabajadas.toFixed(1)+'hs' : '—'}</div>
-            </div>
-            <span class="pill ${f.gpsOk ? 'pill-green' : 'pill-yellow'}" style="margin-left:8px">${f.gpsOk ? 'GPS✓' : 'GPS⚠'}</span>
-          </div>`).join('')
-      }
-    </div>`;
+    <div class="section-title">📋 Fichadas</div>
+
+    <!-- Filtros -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Mes</div>
+        <select id="fich-mes" onchange="filtrarFichadas()"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;outline:none">
+          ${mesesDisp.map(m => `<option value="${m}" ${m===mesActual?'selected':''}>${m}</option>`).join('')}
+          <option value="TODO">— Todas —</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">GPS</div>
+        <select id="fich-gps" onchange="filtrarFichadas()"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;outline:none">
+          <option value="">Todos</option>
+          <option value="ok">GPS ✓</option>
+          <option value="warn">GPS ⚠</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Operario</div>
+        <select id="fich-op" onchange="filtrarFichadas()"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;outline:none">
+          <option value="">— Todos —</option>
+          ${window._fichadasUsuarios.map(u=>`<option value="${u._id}">${u.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Servicio</div>
+        <select id="fich-srv" onchange="filtrarFichadas()"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;outline:none">
+          <option value="">— Todos —</option>
+          ${window._fichadasServicios.map(s=>`<option value="${s._id}">${(s.cliente||'—').substring(0,30)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <!-- Buscador libre + stats + Excel -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <input id="fich-q" placeholder="🔍 Buscar operario o servicio..." oninput="filtrarFichadas()"
+        style="flex:1;min-width:180px;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;outline:none">
+      <button class="btn-secondary" style="padding:9px 14px;font-size:13px;white-space:nowrap" onclick="exportarExcel()">⬇ Excel</button>
+    </div>
+
+    <div id="fich-stats" style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap"></div>
+    <div id="fich-lista"></div>`;
+
+  filtrarFichadas();
+}
+
+function filtrarFichadas() {
+  const mes     = document.getElementById('fich-mes')?.value || '';
+  const opId    = document.getElementById('fich-op')?.value || '';
+  const srvId   = document.getElementById('fich-srv')?.value || '';
+  const gps     = document.getElementById('fich-gps')?.value || '';
+  const q       = (document.getElementById('fich-q')?.value || '').toLowerCase();
+
+  let lista = window._fichadasTodas || [];
+
+  // Filtro mes
+  if (mes && mes !== 'TODO') lista = lista.filter(f => f.fecha?.startsWith(mes));
+
+  // Filtro operario
+  if (opId) lista = lista.filter(f => f.operarioId === opId);
+
+  // Filtro servicio
+  if (srvId) lista = lista.filter(f => f.servicioId === srvId);
+
+  // Filtro GPS
+  if (gps === 'ok')   lista = lista.filter(f => f.gpsOk);
+  if (gps === 'warn') lista = lista.filter(f => !f.gpsOk);
+
+  // Búsqueda libre
+  if (q) lista = lista.filter(f =>
+    (f.operarioNombre||'').toLowerCase().includes(q) ||
+    (f.clienteNombre||'').toLowerCase().includes(q)
+  );
+
+  // Ordenar: fecha desc, entrada desc
+  lista = lista.sort((a,b) => b.fecha?.localeCompare(a.fecha||'')||0 || (b.entrada||'').localeCompare(a.entrada||''));
+
+  // Stats resumen
+  const hsTotal = lista.reduce((s,f) => s + (f.horasTrabajadas||0), 0);
+  const pendientes = lista.filter(f => !f.salida).length;
+  const sinGps = lista.filter(f => !f.gpsOk).length;
+  const statsEl = document.getElementById('fich-stats');
+  if (statsEl) statsEl.innerHTML = [
+    `<span style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700">${lista.length} registros</span>`,
+    `<span style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--accent)">${hsTotal.toFixed(1)}hs total</span>`,
+    pendientes > 0 ? `<span style="background:var(--yellow-light);border:1px solid rgba(224,123,42,.3);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--yellow)">⏳ ${pendientes} pendientes</span>` : '',
+    sinGps > 0 ? `<span style="background:var(--red-light);border:1px solid rgba(214,61,74,.2);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--red)">GPS⚠ ${sinGps}</span>` : ''
+  ].filter(Boolean).join('');
+
+  const cont = document.getElementById('fich-lista');
+  if (!cont) return;
+
+  if (!lista.length) {
+    cont.innerHTML = `<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin fichadas para los filtros seleccionados</div></div>`;
+    return;
+  }
+
+  cont.innerHTML = `<div class="card-section" style="padding:0;overflow:hidden">` +
+    lista.map(f => {
+      const hsStr = f.horasTrabajadas ? f.horasTrabajadas.toFixed(1) + 'hs' : '—';
+      const salidaStr = f.salida || '<em style="color:var(--yellow)">pendiente</em>';
+      return '<div class="list-item" style="padding:10px 14px;border-bottom:1px solid var(--border)">'
+        + '<div class="list-item-info" style="flex:1">'
+        + '<div class="list-item-name" style="font-size:13px">' + (f.operarioNombre||'—') + ' → ' + (f.clienteNombre||'—') + '</div>'
+        + '<div class="list-item-sub" style="margin-top:2px">' + (f.fecha||'—') + ' · ' + (f.entrada||'?') + ' → ' + salidaStr + ' · ' + hsStr + '</div>'
+        + '</div>'
+        + '<span class="pill ' + (f.gpsOk ? 'pill-green' : 'pill-yellow') + '" style="margin-left:8px;flex-shrink:0">' + (f.gpsOk ? 'GPS✓' : 'GPS⚠') + '</span>'
+        + '</div>';
+    }).join('')
+    + '</div>';
 }
 
 // ════════════════════════════════════════════
