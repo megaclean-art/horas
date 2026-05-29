@@ -4378,14 +4378,138 @@ async function renderReporteBancoHoras() {
     horasFichadasMes[f.operarioId] = (horasFichadasMes[f.operarioId] || 0) + f.horasTrabajadas;
   }
 
-  // Horas fijas por operario desde servicios asignados
+  // ── HELPER: contar ocurrencias reales de días de esquema dentro de un período ──
+  // Devuelve cantidad de veces que caen los días (ej: ['LUN','JUE']) entre fechaDesde y fechaHasta inclusive
+  function contarOcurrenciasDias(diasEsquema, fechaDesde, fechaHasta) {
+    const DIAS_MAP = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
+    let count = 0;
+    const cur = new Date(fechaDesde + 'T12:00:00');
+    const fin = new Date(fechaHasta + 'T12:00:00');
+    while (cur <= fin) {
+      if (diasEsquema.includes(DIAS_MAP[cur.getDay()])) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }
+
+  // ── HELPER: calcular horas fijas de un operario en un servicio para un período ──
+  // Si el período es el mes completo → 4 semanas × diasSemana × hsPorDia
+  // Si es parcial → conteo real de ocurrencias × hsPorDia
+  function calcHsServicioPeriodo(srv, diasEsquema, hsPorDia, fechaDesde, fechaHasta, primerDiaMes, ultimoDiaMes) {
+    const esMesCompleto = fechaDesde <= primerDiaMes && fechaHasta >= ultimoDiaMes;
+    if (esMesCompleto) {
+      // Método Skylab: 4 semanas × días/semana × hs/día
+      return diasEsquema.length * 4 * hsPorDia;
+    } else {
+      // Período parcial: contar ocurrencias reales del patrón
+      const ocurrencias = contarOcurrenciasDias(diasEsquema, fechaDesde, fechaHasta);
+      return ocurrencias * hsPorDia;
+    }
+  }
+
+  // ── HORAS FIJAS POR OPERARIO ──
+  // Para cada servicio, por cada operario asignado, calcular según su período activo en el mes
   const horasFijasMes = {};
-  for (const s of servicios) {
-    const opsS = normOps(s.operarios);
-    const hsSemanales = Number(s.horasPorSemana) || (Number(s.horasContratadas)||0) * (s.dias?.length||0);
-    const hsMensuales = hsSemanales * 4;
-    for (const opId of opsS) {
-      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + hsMensuales;
+  // También calculamos recibo proporcional para altas/bajas de empleado nuevo
+  const reciboProporcionado = {}; // { opId: hsReciboAjustado } — solo si es alta/baja en el mes
+
+  const [anioMes, numMes] = mesActual.split('-').map(Number);
+  const primerDiaMes = mesActual + '-01';
+  const ultimoDiaMes = mesActual + '-' + String(new Date(anioMes, numMes, 0).getDate()).padStart(2,'0');
+
+  for (const srv of servicios) {
+    const diasEsquema = Array.isArray(srv.dias) ? srv.dias : [];
+    if (!diasEsquema.length) continue;
+
+    // Calcular horas por día del servicio
+    let hsPorDia = 0;
+    let horariosPorDia = {};
+    try {
+      if (srv.horariosPorDia) {
+        horariosPorDia = typeof srv.horariosPorDia === 'string' ? JSON.parse(srv.horariosPorDia) : srv.horariosPorDia;
+      }
+    } catch {}
+    // Si tiene horarios por día diferenciados, usar promedio ponderado
+    const hsPorDiaMap = {};
+    for (const dia of diasEsquema) {
+      if (horariosPorDia[dia]?.hs) {
+        hsPorDiaMap[dia] = Number(horariosPorDia[dia].hs);
+      } else {
+        // Fallback: horasPorSemana / cantidad de días, o horasContratadas
+        const hsSemanales = Number(srv.horasPorSemana) || (Number(srv.horasContratadas)||0) * diasEsquema.length;
+        hsPorDiaMap[dia] = diasEsquema.length > 0 ? hsSemanales / diasEsquema.length : 0;
+      }
+    }
+
+    // Parsear operarios del servicio como objetos {id, fechaInicio}
+    let opsRawSrv = srv.operarios;
+    if (typeof opsRawSrv === 'string') { try { opsRawSrv = JSON.parse(opsRawSrv); } catch { opsRawSrv = []; } }
+    if (!Array.isArray(opsRawSrv)) opsRawSrv = [];
+    const opsObjsSrv = opsRawSrv.map(o => typeof o === 'string' ? { id: o, fechaInicio: '' } : o);
+
+    for (const opObj of opsObjsSrv) {
+      const opId = opObj.id;
+      if (!opId) continue;
+
+      // Determinar período activo del operario en este servicio dentro del mes
+      let fechaDesde = primerDiaMes;
+      let fechaHasta = ultimoDiaMes;
+      let esAltaEnMes = false;
+      let esBajaEnMes = false;
+
+      if (opObj.fechaInicio) {
+        // Si la fechaInicio cae dentro del mes → alta parcial
+        if (opObj.fechaInicio > primerDiaMes && opObj.fechaInicio <= ultimoDiaMes) {
+          fechaDesde = opObj.fechaInicio;
+          esAltaEnMes = true;
+        } else if (opObj.fechaInicio > ultimoDiaMes) {
+          // Todavía no empezó este mes → no sumar
+          continue;
+        }
+        // Si fechaInicio < primerDiaMes → ya estaba activo, usa todo el mes
+      }
+
+      // Calcular horas trabajadas proporcionales para cada día del esquema
+      // (puede haber días con distintas hs → calcular por día)
+      let hsOperario = 0;
+      for (const dia of diasEsquema) {
+        const hsDia = hsPorDiaMap[dia] || 0;
+        if (hsDia === 0) continue;
+        const esMesCompleto = fechaDesde <= primerDiaMes;
+        if (esMesCompleto) {
+          // Mes completo: 4 semanas
+          hsOperario += 4 * hsDia;
+        } else {
+          // Parcial: contar ocurrencias reales del patrón para ESE día específico
+          const ocurrencias = contarOcurrenciasDias([dia], fechaDesde, fechaHasta);
+          hsOperario += ocurrencias * hsDia;
+        }
+      }
+      horasFijasMes[opId] = (horasFijasMes[opId] || 0) + hsOperario;
+
+      // ── RECIBO PROPORCIONAL solo para alta de empleado nuevo en el mes ──
+      // Condición: fechaInicio del operario en ESTE servicio cae dentro del mes
+      // y NO es el primer día del mes
+      if (esAltaEnMes && opObj.fechaInicio > primerDiaMes) {
+        // Calcular horas de recibo proporcionales para este servicio
+        // usando el mismo método: 4 semanas × ocurrencias proporcionales
+        // La proporción es: ocurrencias reales desde alta / ocurrencias en mes completo (4×días/sem)
+        const ocurrenciasReales = contarOcurrenciasDias(diasEsquema, fechaDesde, ultimoDiaMes);
+        const ocurrenciasMesCompleto = diasEsquema.length * 4;
+        // hs recibo base del operario (de su ficha)
+        const opData = operarios.find(op => op._id === opId);
+        if (opData && opData.horasRecibo) {
+          const reciboBase = Number(opData.horasRecibo) || 0;
+          // Proporcionar solo la parte de este servicio
+          // (si tiene múltiples servicios, cada uno aporta su parte)
+          const hsReciboPorServicio = ocurrenciasMesCompleto > 0
+            ? reciboBase * (ocurrenciasReales / ocurrenciasMesCompleto)
+            : 0;
+          if (!reciboProporcionado[opId]) reciboProporcionado[opId] = { ajuste: 0, esAlta: true };
+          reciboProporcionado[opId].ajuste += hsReciboPorServicio - reciboBase;
+          reciboProporcionado[opId].fechaAlta = opObj.fechaInicio;
+        }
+      }
     }
   }
 
@@ -4474,7 +4598,13 @@ async function renderReporteBancoHoras() {
   // Total = fijas + variables fichadas + coberturas estimadas
   const ops = operarios.filter(o => o.rol === 'OPERARIO' && o.horasRecibo);
   const rows = ops.map(o => {
-    const recibo = Number(o.horasRecibo) || 0;
+    // Recibo: usar proporcional si es alta de empleado nuevo en el mes
+    const reciboBase = Number(o.horasRecibo) || 0;
+    const propInfo = reciboProporcionado[o._id];
+    // propInfo.ajuste es negativo (descuento proporcional)
+    const recibo = propInfo ? Math.max(0, reciboBase + propInfo.ajuste) : reciboBase;
+    const esReciboProporc = !!propInfo && propInfo.ajuste !== 0;
+
     const licInfo = enLicencia[o._id];
 
     // Si está en licencia → calcular proporción de horas fijas a descontar
@@ -4497,7 +4627,7 @@ async function renderReporteBancoHoras() {
       : hsFijas > 0 ? 'FIJO'
       : (hsVariables + hsCoberturas) > 0 ? 'VARIABLE' : '—';
     const diff = trabajadas - recibo;
-    return { op: o, recibo, trabajadas, hsFijas, hsVariables, hsCoberturas, hsSinFichar, diff, fuente, licInfo, hsFijasDescontadas };
+    return { op: o, recibo, reciboBase, esReciboProporc, propInfo, trabajadas, hsFijas, hsVariables, hsCoberturas, hsSinFichar, diff, fuente, licInfo, hsFijasDescontadas };
   }).sort((a, b) => {
     // Licencias primero, luego por diferencia
     if (a.licInfo && !b.licInfo) return -1;
@@ -4630,8 +4760,12 @@ function filtrarBanco() {
           </div>` : ''}
           ${!esLicencia && r.hsSinFichar > 0 ? `<div style="font-size:10px;color:var(--yellow);font-weight:700;margin-top:2px">⚠ ${r.hsSinFichar.toFixed(1)}hs de cobertura estimadas sin fichar</div>` : ''}
           ${!esLicencia && r.hsCoberturas > 0 && r.hsSinFichar === 0 ? `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${r.hsCoberturas.toFixed(1)}hs de cobertura fichadas</div>` : ''}
+          ${!esLicencia && r.esReciboProporc ? `<div style="font-size:10px;color:var(--yellow);margin-top:2px">📅 Alta ${r.propInfo.fechaAlta} · recibo base ${r.reciboBase}hs → proporcional ${r.recibo.toFixed(1)}hs</div>` : ''}
         </div>
-        <div style="text-align:center;font-size:14px;font-weight:700;color:var(--text2)">${r.recibo}</div>
+        <div style="text-align:center;font-size:14px;font-weight:700;color:${r.esReciboProporc?'var(--yellow)':'var(--text2)'}">
+          ${r.recibo.toFixed(1)}
+          ${r.esReciboProporc ? `<span style="font-size:9px;display:block;color:var(--yellow)" title="Alta ${r.propInfo.fechaAlta} · Base ${r.reciboBase}hs">✂ proporcional</span>` : ''}
+        </div>
         <div style="text-align:center;font-size:14px;font-weight:700;color:${esLicencia?'var(--accent)':'var(--text2)'}">
           ${esLicencia ? `${r.trabajadas.toFixed(1)}<span style="font-size:9px;display:block;color:var(--accent)">+lic</span>` : `${r.trabajadas.toFixed(1)}${r.hsSinFichar>0?'<span style="font-size:10px;color:var(--yellow)"> *</span>':''}`}
         </div>
