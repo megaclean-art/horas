@@ -4827,16 +4827,14 @@ async function renderReportes() {
 }
 
 // ── REPORTE 1: BANCO DE HORAS ──
-async function renderReporteBancoHoras() {
-  const c = document.getElementById('main-content');
-  c.innerHTML = `<div class="section-title">Banco de Horas</div><div style="text-align:center;padding:30px;color:var(--text3)">Calculando...</div>`;
-
-  const [operarios, fichadas, servicios, coberturas] = await Promise.all([
-    fsList('horas_usuarios'), fsList('horas_fichadas'), fsList('horas_servicios'), fsList('horas_coberturas')
-  ]);
-
-  const mesActual = isoHoy().slice(0, 7);
-  const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mesActual));
+// ════════════════════════════════════════════════════════════════
+// _calcularBancoHoras: lógica de cálculo pura del banco de horas
+// Recibe el mes ("YYYY-MM") y una fecha de referencia ("YYYY-MM-DD")
+// que reemplaza a "hoy" — útil para snapshots de cierre mensual.
+// Devuelve { rows, stats } sin tocar el DOM.
+// ════════════════════════════════════════════════════════════════
+function _calcularBancoHoras({ mes, fechaReferencia, operarios, fichadas, servicios, coberturas }) {
+  const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mes));
 
   // Horas fichadas reales este mes por operario
   const horasFichadasMes = {};
@@ -4886,9 +4884,9 @@ async function renderReporteBancoHoras() {
   // ══════════════════════════════════════════════════════════════
   // CÁLCULO DE PERÍODOS DEL MES
   // ══════════════════════════════════════════════════════════════
-  const [anioMes, numMes] = mesActual.split('-').map(Number);
-  const primerDiaMes = mesActual + '-01';
-  const ultimoDiaMes = mesActual + '-' + String(new Date(anioMes, numMes, 0).getDate()).padStart(2,'0');
+  const [anioMes, numMes] = mes.split('-').map(Number);
+  const primerDiaMes = mes + '-01';
+  const ultimoDiaMes = mes + '-' + String(new Date(anioMes, numMes, 0).getDate()).padStart(2,'0');
 
   // ══════════════════════════════════════════════════════════════
   // HORAS FIJAS + RECIBO PROPORCIONAL
@@ -4978,7 +4976,7 @@ async function renderReporteBancoHoras() {
     let fechaProporc = null;
 
     // Alta nueva: fechaIngreso cae en el mes actual y no es el 1°
-    if (op.fechaIngreso && op.fechaIngreso.startsWith(mesActual) && op.fechaIngreso > primerDiaMes) {
+    if (op.fechaIngreso && op.fechaIngreso.startsWith(mes) && op.fechaIngreso > primerDiaMes) {
       // Calcular proporción: ocurrencias reales desde ingreso / total mes completo
       // Usamos los servicios del operario como referencia de sus días de trabajo
       const srvs = servicios.filter(s => {
@@ -5012,7 +5010,7 @@ async function renderReporteBancoHoras() {
       }
     }
     // Baja: fechaEgreso cae en el mes actual y no es el último día
-    else if (op.fechaEgreso && op.fechaEgreso.startsWith(mesActual) && op.fechaEgreso < ultimoDiaMes) {
+    else if (op.fechaEgreso && op.fechaEgreso.startsWith(mes) && op.fechaEgreso < ultimoDiaMes) {
       const srvs = servicios.filter(s => {
         let ops = s.operarios;
         if (typeof ops === 'string') { try { ops = JSON.parse(ops); } catch { ops = []; } }
@@ -5057,7 +5055,7 @@ async function renderReporteBancoHoras() {
   const cobMes = coberturas.filter(c =>
     c.reemplazanteId &&
     c.estado === 'ACTIVA' &&
-    c.fechaInicio?.slice(0,7) === mesActual
+    c.fechaInicio?.slice(0,7) === mes
   );
 
   for (const cob of cobMes) {
@@ -5104,7 +5102,7 @@ async function renderReporteBancoHoras() {
   // Si tienen una cobertura AUSENCIA activa con motivo lic. por enfermedad este mes
   // sus horas fijas NO se computan mientras dure la licencia
   const enLicencia = {}; // { operarioId: { cob, diasLicencia } }
-  const hoy = isoHoy();
+  const hoy = fechaReferencia;
 
   const cobsLicencia = coberturas.filter(c => {
     const motivo = (c.motivo||'').toLowerCase().trim();
@@ -5114,13 +5112,13 @@ async function renderReporteBancoHoras() {
       (motivo.includes('enfermedad') || motivo.includes('art') || (motivo.includes('lic') && motivo.includes('enf'))) &&
       opId &&
       c.fechaInicio <= hoy &&
-      (!c.fechaFin || c.fechaFin >= mesActual + '-01')
+      (!c.fechaFin || c.fechaFin >= mes + '-01')
     );
   });
 
   for (const cob of cobsLicencia) {
     // Calcular días de licencia dentro del mes actual
-    const fi = new Date(Math.max(new Date(cob.fechaInicio + 'T12:00:00'), new Date(mesActual + '-01T12:00:00')));
+    const fi = new Date(Math.max(new Date(cob.fechaInicio + 'T12:00:00'), new Date(mes + '-01T12:00:00')));
     const ff = new Date(Math.min(
       cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date(hoy + 'T12:00:00'),
       new Date(hoy + 'T12:00:00')
@@ -5144,7 +5142,7 @@ async function renderReporteBancoHoras() {
     let hsFijasDescontadas = 0;
     if (licInfo) {
       // Días hábiles de licencia / días hábiles del mes × horas fijas mensuales
-      const diasMes = new Date(parseInt(mesActual.split('-')[0]), parseInt(mesActual.split('-')[1]), 0).getDate();
+      const diasMes = new Date(parseInt(mes.split('-')[0]), parseInt(mes.split('-')[1]), 0).getDate();
       const proporcion = Math.min(1, licInfo.diasLicencia / diasMes);
       hsFijasDescontadas = hsFijas * proporcion;
       hsFijas = Math.max(0, hsFijas - hsFijasDescontadas);
@@ -5176,6 +5174,26 @@ async function renderReporteBancoHoras() {
   const reciboTotalOps = rows.reduce((s, r) => s + r.recibo, 0);
   const idxNoDeben = reciboTotalOps > 0 ? (nosDebenTotal / reciboTotalOps * 100) : 0;
   const idxDebemos = reciboTotalOps > 0 ? (debemosTotal / reciboTotalOps * 100) : 0;
+
+  const stats = { nosDebenCount, debemosCount, equilibrio, licenciaCount, nosDebenTotal, debemosTotal, reciboTotalOps, idxNoDeben, idxDebemos };
+  return { rows, stats };
+}
+
+async function renderReporteBancoHoras() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Banco de Horas</div><div style="text-align:center;padding:30px;color:var(--text3)">Calculando...</div>`;
+
+  const [operarios, fichadas, servicios, coberturas] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_fichadas'), fsList('horas_servicios'), fsList('horas_coberturas')
+  ]);
+
+  const mesActual = isoHoy().slice(0, 7);
+  const { rows, stats } = _calcularBancoHoras({
+    mes: mesActual,
+    fechaReferencia: isoHoy(),
+    operarios, fichadas, servicios, coberturas
+  });
+  const { nosDebenCount, debemosCount, equilibrio, licenciaCount, nosDebenTotal, debemosTotal, reciboTotalOps, idxNoDeben, idxDebemos } = stats;
 
   const [y, m] = mesActual.split('-');
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -5476,6 +5494,59 @@ async function descargarArchivoMes(mes) {
       cob.horasContratadas||cob.horasTotal||0,
       cob.estado||''
     ].join(';') + '\n';
+  }
+
+  // ─────────── BANCO DE HORAS — SNAPSHOT AL CIERRE ───────────
+  // Foto del banco al último día hábil del mes (o a "hoy" si el mes
+  // todavía no terminó). Esta es la última foto de movimientos.
+  const hoyIso = isoHoy();
+  const [anioMes, numMes] = mes.split('-').map(Number);
+  const ultimoDiaCal = mes + '-' + String(new Date(anioMes, numMes, 0).getDate()).padStart(2,'0');
+  // Último día hábil = retroceder desde el último día si cae sáb/dom
+  let fechaCorte = new Date(ultimoDiaCal + 'T12:00:00');
+  while (fechaCorte.getDay() === 0 || fechaCorte.getDay() === 6) {
+    fechaCorte.setDate(fechaCorte.getDate() - 1);
+  }
+  let fechaCorteIso = fechaCorte.toISOString().slice(0,10);
+  // Si el mes aún no terminó, usar hoy como tope (no proyectar hacia el futuro)
+  if (fechaCorteIso > hoyIso) fechaCorteIso = hoyIso;
+
+  const { rows: bancoRows, stats: bancoStats } = _calcularBancoHoras({
+    mes,
+    fechaReferencia: fechaCorteIso,
+    operarios, fichadas, servicios, coberturas
+  });
+
+  csv += `\nBANCO DE HORAS — Foto al ${fechaCorteIso} (${bancoRows.length} operarios)\n`;
+  csv += `Nos deben: ${bancoStats.nosDebenCount} op. (${bancoStats.nosDebenTotal.toFixed(1)}h) · `;
+  csv += `Les debemos: ${bancoStats.debemosCount} op. (${bancoStats.debemosTotal.toFixed(1)}h) · `;
+  csv += `Equilibrio: ${bancoStats.equilibrio} · En licencia: ${bancoStats.licenciaCount}\n`;
+  csv += `Recibo total: ${bancoStats.reciboTotalOps.toFixed(1)}h · Índice no trabajadas: ${bancoStats.idxNoDeben.toFixed(1)}% · Índice adicionales: ${bancoStats.idxDebemos.toFixed(1)}%\n\n`;
+  csv += `Operario;Legajo;Recibo (h);Recibo Base (h);Proporcionado;Motivo Proporc.;Hs Fijas;Hs Variables;Hs Coberturas;Hs Sin Fichar;Hs Trabajadas;Diferencia;Estado;Fuente;En Licencia;Motivo Licencia;Días Licencia\n`;
+  for (const r of bancoRows) {
+    const estado = r.licInfo ? 'LICENCIA'
+      : r.diff < 0 ? 'NOS DEBE'
+      : r.diff > 0 ? 'LE DEBEMOS'
+      : 'EQUILIBRIO';
+    csv += [
+      r.op.nombre || '',
+      r.op.legajo || r.op.dni || '',
+      r.recibo.toFixed(2),
+      r.reciboBase.toFixed(2),
+      r.esReciboProporc ? 'SI' : 'NO',
+      r.propInfo ? `${r.propInfo.motivo} ${r.propInfo.fecha}` : '',
+      r.hsFijas.toFixed(2),
+      r.hsVariables.toFixed(2),
+      r.hsCoberturas.toFixed(2),
+      r.hsSinFichar.toFixed(2),
+      r.trabajadas.toFixed(2),
+      r.diff.toFixed(2),
+      estado,
+      r.fuente,
+      r.licInfo ? 'SI' : 'NO',
+      r.licInfo ? (r.licInfo.cob.motivo || '') : '',
+      r.licInfo ? r.licInfo.diasLicencia : ''
+    ].map(v => String(v).replace(/;/g, ',')).join(';') + '\n';
   }
 
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
