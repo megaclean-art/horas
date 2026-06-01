@@ -4828,6 +4828,114 @@ async function renderReportes() {
 
 // ── REPORTE 1: BANCO DE HORAS ──
 // ════════════════════════════════════════════════════════════════
+// SNAPSHOTS / CIERRES DE BANCO DE HORAS
+// Guardan una "foto congelada" del banco al cierre de cada mes.
+// Colección: horas_cierres · Doc ID: {mes}_{operarioId}
+// ════════════════════════════════════════════════════════════════
+
+// Genera y guarda los snapshots del banco para un mes específico.
+// Devuelve { ok: bool, guardados: number, total: number }
+async function guardarSnapshotsBanco(mes, fechaCorte, opts = {}) {
+  const { operarios, fichadas, servicios, coberturas } = opts.datos || {};
+  let _ops = operarios, _fic = fichadas, _srv = servicios, _cob = coberturas;
+  if (!_ops || !_fic || !_srv || !_cob) {
+    [_ops, _fic, _srv, _cob] = await Promise.all([
+      fsList('horas_usuarios'), fsList('horas_fichadas'),
+      fsList('horas_servicios'), fsList('horas_coberturas')
+    ]);
+  }
+
+  const { rows } = _calcularBancoHoras({
+    mes, fechaReferencia: fechaCorte,
+    operarios: _ops, fichadas: _fic, servicios: _srv, coberturas: _cob
+  });
+
+  // Para cada operario, guardar fichadas del mes (resumen + listado)
+  const fichadasPorOp = {};
+  for (const f of _fic) {
+    if (!f.fecha?.startsWith(mes)) continue;
+    if (!f.operarioId) continue;
+    if (!fichadasPorOp[f.operarioId]) fichadasPorOp[f.operarioId] = [];
+    fichadasPorOp[f.operarioId].push({
+      fecha: f.fecha || '',
+      entrada: f.entrada || '',
+      salida: f.salida || '',
+      horas: Number(f.horasTrabajadas) || 0,
+      cliente: f.clienteNombre || '',
+      coberturaId: f.coberturaId || null
+    });
+  }
+
+  const generadoEn = new Date().toISOString();
+  const generadoPor = (currentUser?.nombre || currentUser?._id || 'SISTEMA');
+
+  let guardados = 0;
+  for (const r of rows) {
+    const docId = `${mes}_${r.op._id}`;
+    const fichadasOp = fichadasPorOp[r.op._id] || [];
+    const totalHsFichadas = fichadasOp.reduce((s, f) => s + f.horas, 0);
+
+    const doc = {
+      mes,
+      fechaCorte,
+      generadoEn,
+      generadoPor,
+
+      operarioId: r.op._id,
+      operarioNombre: r.op.nombre || '',
+      legajo: r.op.legajo || r.op.dni || '',
+
+      recibo: Number(r.recibo.toFixed(2)),
+      reciboBase: Number(r.reciboBase.toFixed(2)),
+      esReciboProporc: !!r.esReciboProporc,
+      motivoProporc: r.propInfo?.motivo || null,
+      fechaProporc: r.propInfo?.fecha || null,
+
+      hsFijas: Number(r.hsFijas.toFixed(2)),
+      hsFijasDescontadas: Number((r.hsFijasDescontadas||0).toFixed(2)),
+      hsVariables: Number(r.hsVariables.toFixed(2)),
+      hsCoberturas: Number(r.hsCoberturas.toFixed(2)),
+      hsSinFichar: Number(r.hsSinFichar.toFixed(2)),
+      trabajadas: Number(r.trabajadas.toFixed(2)),
+      diff: Number(r.diff.toFixed(2)),
+      fuente: r.fuente,
+
+      enLicencia: !!r.licInfo,
+      motivoLicencia: r.licInfo?.cob?.motivo || null,
+      diasLicencia: r.licInfo?.diasLicencia || 0,
+      fechaInicioLic: r.licInfo?.fechaInicio || null,
+      fechaFinLic: r.licInfo?.fechaFin || null,
+
+      // Detalle para drill-down ante reclamos
+      fichadasCount: fichadasOp.length,
+      fichadasTotalHs: Number(totalHsFichadas.toFixed(2)),
+      fichadas: fichadasOp
+    };
+
+    const ok = await fsSave('horas_cierres', docId, doc);
+    if (ok) guardados++;
+  }
+
+  // Invalidar caché para que próximas lecturas traigan los nuevos snapshots
+  invalidarCache('horas_cierres');
+
+  return { ok: true, guardados, total: rows.length, fechaCorte };
+}
+
+// Calcula el último día hábil de un mes (retrocede si cae fin de semana).
+// Si el mes aún no terminó, devuelve "hoy" para no proyectar al futuro.
+function ultimoDiaHabilMes(mes) {
+  const hoyIso = isoHoy();
+  const [anio, num] = mes.split('-').map(Number);
+  const ultimoCal = mes + '-' + String(new Date(anio, num, 0).getDate()).padStart(2,'0');
+  let fc = new Date(ultimoCal + 'T12:00:00');
+  while (fc.getDay() === 0 || fc.getDay() === 6) fc.setDate(fc.getDate() - 1);
+  let res = fc.toISOString().slice(0,10);
+  if (res > hoyIso) res = hoyIso;
+  return res;
+}
+
+// ════════════════════════════════════════════════════════════════
 // _calcularBancoHoras: lógica de cálculo pura del banco de horas
 // Recibe el mes ("YYYY-MM") y una fecha de referencia ("YYYY-MM-DD")
 // que reemplaza a "hoy" — útil para snapshots de cierre mensual.
@@ -5357,11 +5465,27 @@ async function renderArchivoMensual() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">🗄️ Archivo Mensual</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
 
-  const [fichadas, coberturas, configDoc] = await Promise.all([
+  const [fichadas, coberturas, configDoc, cierres] = await Promise.all([
     fsList('horas_fichadas'),
     fsList('horas_coberturas'),
-    fsGet('config', 'archivo_mensual')
+    fsGet('config', 'archivo_mensual'),
+    fsList('horas_cierres')
   ]);
+
+  // Agrupar cierres por mes para mostrar estado
+  const cierresPorMes = {}; // mes -> { count, fechaCorte, generadoEn }
+  for (const cz of cierres) {
+    if (!cz.mes) continue;
+    if (!cierresPorMes[cz.mes]) {
+      cierresPorMes[cz.mes] = { count: 0, fechaCorte: cz.fechaCorte, generadoEn: cz.generadoEn };
+    }
+    cierresPorMes[cz.mes].count++;
+    // Quedarse con la fecha más reciente
+    if (cz.generadoEn && (!cierresPorMes[cz.mes].generadoEn || cz.generadoEn > cierresPorMes[cz.mes].generadoEn)) {
+      cierresPorMes[cz.mes].generadoEn = cz.generadoEn;
+      cierresPorMes[cz.mes].fechaCorte = cz.fechaCorte;
+    }
+  }
 
   const config = configDoc || { meses: [] };
   const mesesArchivados = config.meses || [];
@@ -5424,6 +5548,8 @@ async function renderArchivoMensual() {
       const archivado = mesesArchivados.includes(mes);
       const esActual = mes === mesActual;
       const antiguo = mes < limite6meses;
+      const foto = cierresPorMes[mes];
+      const fotoFechaCorta = foto?.generadoEn ? foto.generadoEn.slice(0,10) : '';
 
       return `
       <div class="card-section" style="margin-bottom:10px;${antiguo && !archivado?'border-color:rgba(214,61,74,.3);background:rgba(214,61,74,.04)':''}">
@@ -5438,11 +5564,17 @@ async function renderArchivoMensual() {
               📍 ${data.fichadas.length} fichadas · 🔄 ${data.coberturas.length} coberturas
             </div>
             ${archivado?`<div style="font-size:12px;color:var(--green);margin-top:2px">✓ Archivado</div>`:''}
+            ${foto
+              ? `<div style="font-size:12px;color:#6b46c1;margin-top:2px">📸 Foto del cierre: ${foto.count} operarios · al ${foto.fechaCorte || '?'} · generada ${fotoFechaCorta}</div>`
+              : `<div style="font-size:12px;color:var(--text3);margin-top:2px">📷 Sin foto del cierre</div>`}
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-secondary" style="flex:1;min-width:120px;padding:9px" onclick="descargarArchivoMes('${mes}')">
             📥 Descargar Excel
+          </button>
+          <button class="btn-secondary" style="flex:1;min-width:120px;padding:9px;border-color:#6b46c1;color:#6b46c1" onclick="regenerarFotoMes('${mes}')">
+            📸 ${foto?'Regenerar foto':'Generar foto'}
           </button>
           ${!esActual ? `<button class="btn-secondary" style="flex:1;min-width:120px;padding:9px;${antiguo && !archivado?'border-color:var(--red);color:var(--red)':''}" onclick="archivarYBorrarMes('${mes}')">
             🗑 Descargar y limpiar
@@ -5450,6 +5582,26 @@ async function renderArchivoMensual() {
         </div>
       </div>`;
     }).join('')}`;
+}
+
+// Genera/regenera el snapshot del banco para un mes (foto congelada)
+async function regenerarFotoMes(mes) {
+  const [y, mo] = mes.split('-');
+  const nombresMeses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const label = `${nombresMeses[parseInt(mo)-1]} ${y}`;
+
+  if (!confirm(`¿Generar foto del cierre del banco para ${label}?\n\nVa a guardar un snapshot por cada operario con sus horas, fichadas y diferencias al último día hábil del mes. Si ya había una foto, se reemplaza por la nueva.`)) return;
+
+  toast(`Generando foto de ${label}...`, 'info');
+  try {
+    const fechaCorte = ultimoDiaHabilMes(mes);
+    const res = await guardarSnapshotsBanco(mes, fechaCorte);
+    toast(`📸 Foto guardada: ${res.guardados} operarios · corte al ${fechaCorte}`, 'ok');
+    renderArchivoMensual(); // refrescar UI
+  } catch (e) {
+    console.error(e);
+    toast('Error generando foto. Ver consola.', 'err');
+  }
 }
 
 async function descargarArchivoMes(mes) {
@@ -5499,17 +5651,7 @@ async function descargarArchivoMes(mes) {
   // ─────────── BANCO DE HORAS — SNAPSHOT AL CIERRE ───────────
   // Foto del banco al último día hábil del mes (o a "hoy" si el mes
   // todavía no terminó). Esta es la última foto de movimientos.
-  const hoyIso = isoHoy();
-  const [anioMes, numMes] = mes.split('-').map(Number);
-  const ultimoDiaCal = mes + '-' + String(new Date(anioMes, numMes, 0).getDate()).padStart(2,'0');
-  // Último día hábil = retroceder desde el último día si cae sáb/dom
-  let fechaCorte = new Date(ultimoDiaCal + 'T12:00:00');
-  while (fechaCorte.getDay() === 0 || fechaCorte.getDay() === 6) {
-    fechaCorte.setDate(fechaCorte.getDate() - 1);
-  }
-  let fechaCorteIso = fechaCorte.toISOString().slice(0,10);
-  // Si el mes aún no terminó, usar hoy como tope (no proyectar hacia el futuro)
-  if (fechaCorteIso > hoyIso) fechaCorteIso = hoyIso;
+  const fechaCorteIso = ultimoDiaHabilMes(mes);
 
   const { rows: bancoRows, stats: bancoStats } = _calcularBancoHoras({
     mes,
@@ -5555,6 +5697,19 @@ async function descargarArchivoMes(mes) {
   link.download = `MegaClean_Archivo_${mes}.csv`;
   link.click();
   toast(`✓ Archivo ${label} descargado`, 'ok');
+
+  // Guardar snapshot del banco a Firestore (foto congelada del cierre)
+  try {
+    const res = await guardarSnapshotsBanco(mes, fechaCorteIso, {
+      datos: { operarios, fichadas, servicios, coberturas }
+    });
+    if (res.guardados > 0) {
+      toast(`📸 Foto del cierre guardada (${res.guardados} operarios)`, 'ok');
+    }
+  } catch (e) {
+    console.error('Error guardando snapshot:', e);
+    toast('⚠ Excel descargado, pero no se pudo guardar la foto en Firestore', 'warn');
+  }
 }
 
 async function archivarYBorrarMes(mes) {
@@ -5619,21 +5774,44 @@ async function archivarYBorrarAntiGuos(meses) {
 }
 
 
-async function renderReporteOperario() {
+async function renderReporteOperario(mesOverride) {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Por Operario</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
 
-  const [operarios, servicios, fichadas, coberturas] = await Promise.all([
-    fsList('horas_usuarios'), fsList('horas_servicios'), fsList('horas_fichadas'), fsList('horas_coberturas')
+  const mesActual = isoHoy().slice(0,7);
+  const mes = mesOverride || mesActual;
+
+  // Si es un mes pasado distinto del actual, redirigir a la vista histórica
+  if (mes !== mesActual) {
+    return renderReporteOperarioHistorico(mes);
+  }
+
+  const [operarios, servicios, fichadas, coberturas, cierres] = await Promise.all([
+    fsList('horas_usuarios'), fsList('horas_servicios'), fsList('horas_fichadas'), fsList('horas_coberturas'), fsList('horas_cierres')
   ]);
-  const mes = isoHoy().slice(0,7);
   const hoy = isoHoy();
   const fichadasMes = fichadas.filter(f => f.fecha?.startsWith(mes));
+
+  // Detectar meses con snapshots guardados para el selector
+  const mesesConFoto = [...new Set(cierres.map(cz => cz.mes).filter(Boolean))].sort().reverse();
+  const opcionesMes = [mesActual, ...mesesConFoto.filter(m => m !== mesActual)];
 
   c.innerHTML = `
     <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
     <div class="section-title">👷 Por Operario</div>
-    <div class="section-sub">Cuenta corriente de horas · ${mes}</div>
+    <div class="section-sub">Cuenta corriente de horas</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <select id="rp-op-mes" onchange="renderReporteOperario(this.value)"
+        style="flex:1;min-width:160px;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+        ${opcionesMes.map(m => {
+          const [yy,mm] = m.split('-');
+          const nombresMeses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+          const etiqueta = `${nombresMeses[parseInt(mm)-1]} ${yy}` + (m === mesActual ? ' (actual)' : ' 📸');
+          return `<option value="${m}" ${m===mes?'selected':''}>${etiqueta}</option>`;
+        }).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--text3)">📸 = foto del cierre</div>
+    </div>
     <input id="rp-op-q" placeholder="🔍 Buscar operario o legajo..." oninput="filtrarRepOp()"
       style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
     <div id="rp-op-lista"></div>`;
@@ -5960,6 +6138,181 @@ function filtrarRepOp() {
     const cont2 = document.getElementById('rp-op-lista');
     if (cont2) cont2.innerHTML = `<div class="card-section"><div style="color:var(--red);padding:16px">Error al mostrar. Intentá de nuevo.</div></div>`;
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// VISTA HISTÓRICA DEL REPORTE POR OPERARIO
+// Lee snapshots de horas_cierres en lugar de calcular en vivo.
+// ════════════════════════════════════════════════════════════════
+async function renderReporteOperarioHistorico(mes) {
+  const c = document.getElementById('main-content');
+  c.innerHTML = `<div class="section-title">Por Operario</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando foto del ${mes}...</div>`;
+
+  const mesActual = isoHoy().slice(0,7);
+  const cierres = await fsList('horas_cierres');
+  const snapshots = cierres.filter(cz => cz.mes === mes).sort((a,b) => (a.operarioNombre||'').localeCompare(b.operarioNombre||''));
+
+  // Lista de meses con snapshots para el selector
+  const mesesConFoto = [...new Set(cierres.map(cz => cz.mes).filter(Boolean))].sort().reverse();
+  const opcionesMes = [mesActual, ...mesesConFoto.filter(m => m !== mesActual)];
+
+  const [yy, mm] = mes.split('-');
+  const nombresMesesLargos = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const mesLabel = `${nombresMesesLargos[parseInt(mm)-1]} ${yy}`;
+
+  if (!snapshots.length) {
+    c.innerHTML = `
+      <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+      <div class="section-title">👷 Por Operario</div>
+      <div class="section-sub">Cuenta corriente de horas</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+        <select onchange="renderReporteOperario(this.value)"
+          style="flex:1;min-width:160px;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+          ${opcionesMes.map(m => {
+            const [y2,m2] = m.split('-');
+            const nM = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+            const et = `${nM[parseInt(m2)-1]} ${y2}` + (m === mesActual ? ' (actual)' : ' 📸');
+            return `<option value="${m}" ${m===mes?'selected':''}>${et}</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div class="card-section" style="text-align:center;padding:30px;color:var(--text3)">
+        📷 No hay foto del cierre para ${mesLabel}.<br><br>
+        <span style="font-size:13px">Generala desde <b>Reportes → Archivo Mensual</b> con el botón "📸 Generar foto".</span>
+      </div>`;
+    return;
+  }
+
+  const fechaCorte = snapshots[0].fechaCorte || '?';
+  const generadoEnFecha = snapshots[0].generadoEn ? snapshots[0].generadoEn.slice(0,10) : '?';
+
+  window._rpOpsHist = snapshots;
+
+  c.innerHTML = `
+    <button class="btn-secondary" style="padding:7px 14px;font-size:13px;margin-bottom:14px" onclick="renderReportes()">← Volver</button>
+    <div class="section-title">👷 Por Operario</div>
+    <div class="section-sub">Cuenta corriente de horas</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <select onchange="renderReporteOperario(this.value)"
+        style="flex:1;min-width:160px;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
+        ${opcionesMes.map(m => {
+          const [y2,m2] = m.split('-');
+          const nM = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+          const et = `${nM[parseInt(m2)-1]} ${y2}` + (m === mesActual ? ' (actual)' : ' 📸');
+          return `<option value="${m}" ${m===mes?'selected':''}>${et}</option>`;
+        }).join('')}
+      </select>
+    </div>
+    <div style="background:rgba(107,70,193,.08);border:1px solid rgba(107,70,193,.3);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+      📸 <b>Foto del cierre — ${mesLabel}</b><br>
+      <span style="font-size:12px;color:var(--text3)">Corte al ${fechaCorte} · Generada el ${generadoEnFecha} · ${snapshots.length} operarios</span>
+    </div>
+    <input id="rp-op-q-hist" placeholder="🔍 Buscar operario o legajo..." oninput="filtrarRepOpHist()"
+      style="width:100%;background:var(--surface);border:1.5px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-bottom:14px">
+    <div id="rp-op-lista-hist"></div>`;
+
+  filtrarRepOpHist();
+}
+
+function filtrarRepOpHist() {
+  if (!window._rpOpsHist) return;
+  const q = (document.getElementById('rp-op-q-hist')?.value||'').toLowerCase();
+  const lista = q ? window._rpOpsHist.filter(s => {
+    const nombre = (s.operarioNombre||'').toLowerCase().replace(/,/g,' ');
+    const qNorm = q.replace(/,/g,' ');
+    return nombre.includes(qNorm) || (s.legajo||'').includes(q);
+  }) : window._rpOpsHist;
+
+  const cont = document.getElementById('rp-op-lista-hist');
+  if (!cont) return;
+  if (!lista.length) { cont.innerHTML=`<div class="card-section"><div style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</div></div>`; return; }
+
+  cont.innerHTML = lista.map(s => {
+    const nombre = (s.operarioNombre||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+    const legajo = s.legajo||'—';
+    const diff = s.diff || 0;
+    const diffColor = diff < 0 ? 'var(--red)' : diff > 0 ? 'var(--green)' : 'var(--text3)';
+    const fuente = s.fuente || 'FIJO';
+    const recibo = s.recibo || 0;
+    const reciboBase = s.reciboBase || 0;
+    const propMotivo = s.motivoProporc;
+    const propFecha = s.fechaProporc;
+
+    return `
+    <div class="card-section" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div>
+          <div style="font-family:var(--font-display);font-size:18px;font-weight:700">${nombre}</div>
+          <div style="font-size:12px;color:var(--text3)">Leg. ${legajo} · ${fuente}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Recibo</div>
+          <div style="font-family:var(--font-display);font-size:22px;font-weight:900;color:${propMotivo?'var(--yellow)':'var(--accent)'}">
+            ${recibo}hs
+            ${propMotivo ? `<div style="font-size:10px;color:var(--yellow);font-weight:600">✂ ${propMotivo==='ALTA'?'Alta':'Baja'} ${propFecha?.slice(8)||''} · base ${reciboBase}hs</div>` : ''}
+          </div>
+        </div>
+      </div>
+
+      ${s.enLicencia ? `
+      <div style="background:rgba(107,70,193,.1);border:1px solid rgba(107,70,193,.3);border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px">
+        🏥 <b>En licencia</b>: ${s.motivoLicencia||'—'} · ${s.diasLicencia||0} días<br>
+        <span style="font-size:11px;color:var(--text3)">${s.fechaInicioLic||''} → ${s.fechaFinLic||''}</span>
+      </div>` : ''}
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Cuenta corriente del mes</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${s.hsFijas > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--text2)">Hs fijas (servicios)</span>
+            <span style="font-weight:700">${s.hsFijas.toFixed(1)}hs</span>
+          </div>` : ''}
+          ${s.hsFijasDescontadas > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--text3)">Descontadas por licencia</span>
+            <span style="font-weight:700;color:var(--text3)">−${s.hsFijasDescontadas.toFixed(1)}hs</span>
+          </div>` : ''}
+          ${s.hsVariables > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--text2)">Hs variables fichadas</span>
+            <span style="font-weight:700;color:var(--green)">+${s.hsVariables.toFixed(1)}hs</span>
+          </div>` : ''}
+          ${s.hsCoberturas > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--text2)">Hs coberturas fichadas</span>
+            <span style="font-weight:700;color:var(--green)">+${s.hsCoberturas.toFixed(1)}hs</span>
+          </div>` : ''}
+          ${s.hsSinFichar > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px">
+            <span style="color:var(--yellow)">⚠ Hs cobertura estimadas (sin fichar)</span>
+            <span style="font-weight:700;color:var(--yellow)">+${s.hsSinFichar.toFixed(1)}hs</span>
+          </div>` : ''}
+          <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px;display:flex;justify-content:space-between;font-size:15px">
+            <span style="font-weight:700">Total trabajado</span>
+            <span style="font-family:var(--font-display);font-size:18px;font-weight:900">${(s.trabajadas||0).toFixed(1)}hs</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:14px">
+            <span style="color:var(--text3)">Diferencia vs recibo</span>
+            <span style="font-family:var(--font-display);font-size:18px;font-weight:900;color:${diffColor}">${diff>=0?'+':''}${diff.toFixed(1)}hs</span>
+          </div>
+        </div>
+      </div>
+
+      ${(s.fichadas && s.fichadas.length) ? `
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--text3);user-select:none;padding:4px 0">
+          📋 Ver ${s.fichadas.length} fichadas del mes (${(s.fichadasTotalHs||0).toFixed(1)}hs)
+        </summary>
+        <div style="margin-top:8px;background:var(--surface2);border-radius:8px;padding:8px;max-height:280px;overflow-y:auto">
+          ${s.fichadas.map(f => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px;border-bottom:1px solid var(--border);font-size:12px">
+              <div>
+                <div style="font-weight:600">${f.fecha}</div>
+                <div style="color:var(--text3);font-size:11px">${f.cliente||'—'} · ${f.entrada||'?'} → ${f.salida||'?'}</div>
+              </div>
+              <div style="font-weight:700">${(f.horas||0).toFixed(1)}hs</div>
+            </div>
+          `).join('')}
+        </div>
+      </details>` : ''}
+    </div>`;
+  }).join('');
 }
 
 // ── REPORTE 3: POR SERVICIO ──
