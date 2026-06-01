@@ -6426,6 +6426,22 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
   const sinInsumosDed  = dedup(sinInsumos);
   const desinfeccionDed = dedup(desinfeccion);
 
+  // Conteos para panel de desglose
+  const _diag = {
+    totalDocs: servicios.length,
+    conInsumosRaw: conInsumos.length,
+    conInsumosUnicos: conInsumosDed.length,
+    duplicadosConIns: conInsumos.length - conInsumosDed.length,
+    sinInsumosRaw: sinInsumos.length,
+    sinInsumosUnicos: sinInsumosDed.length,
+    duplicadosSinIns: sinInsumos.length - sinInsumosDed.length,
+    desinfeccionRaw: desinfeccion.length,
+    desinfeccionUnicos: desinfeccionDed.length,
+    interna: servicios.filter(s => s.zona === 'INTERNA').length,
+    sinZona: sinZona.length,
+    sinZonaList: sinZona.map(s => ({ id: s._id, cliente: s.cliente || '(sin nombre)', direccion: s.direccion || '' }))
+  };
+
   // Filtrar por zona
   const lista = zonaFiltro === 'TODAS'
     ? conInsumosDed
@@ -6448,8 +6464,62 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
         <span style="font-size:22px">🚚</span>
         <span style="font-family:var(--font-display);font-size:20px;font-weight:800;letter-spacing:1px;text-transform:uppercase">Logística</span>
+        <span onclick="logisticaToggleDesglose()" title="Ver desglose de servicios"
+          style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text3);background:var(--surface);border:1px solid var(--border);padding:5px 10px;border-radius:6px;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;user-select:none">
+          📊 Desglose
+        </span>
       </div>
       <div style="color:var(--text3);font-size:13px;margin-bottom:16px;text-transform:capitalize">${mesLabel}</div>
+
+      <!-- Panel desglose (oculto por defecto) -->
+      <div id="log-desglose" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <span style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">📊 Desglose de servicios</span>
+          <span style="font-size:11px;color:var(--text3)">total: <b style="color:var(--text);font-size:14px">${_diag.totalDocs}</b> docs</span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(39,168,90,.08);border-left:3px solid var(--green);border-radius:4px">
+            <div>
+              <b style="color:var(--green)">${_diag.conInsumosUnicos}</b> <span style="color:var(--text3)">con insumos (únicos)</span>
+            </div>
+            <span style="font-size:11px;color:var(--text3)">← se muestra arriba</span>
+          </div>
+
+          ${_diag.duplicadosConIns > 0 ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px 4px 24px;font-size:12px">
+            <span style="color:var(--text3)">+ ${_diag.duplicadosConIns} docs duplicados (mismo cliente, otro operario)</span>
+            <span style="font-size:11px;color:var(--text3)">${_diag.conInsumosRaw} total</span>
+          </div>` : ''}
+
+          ${_diag.sinInsumosUnicos > 0 ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border-radius:4px;border-left:3px solid var(--text3)">
+            <div><b>${_diag.sinInsumosUnicos}</b> <span style="color:var(--text3)">sin insumos</span></div>
+            <span style="font-size:11px;color:var(--text3)">${_diag.duplicadosSinIns>0?`(+${_diag.duplicadosSinIns} dup)`:''}</span>
+          </div>` : ''}
+
+          ${_diag.desinfeccionUnicos > 0 ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border-radius:4px;border-left:3px solid var(--accent)">
+            <div><b style="color:var(--accent)">${_diag.desinfeccionUnicos}</b> <span style="color:var(--text3)">desinfección</span></div>
+            <span style="font-size:11px;color:var(--text3)">${desinfeccionDed.length-desinfeccion.length!==0?'':''}</span>
+          </div>` : ''}
+
+          ${_diag.interna > 0 ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg);border-radius:4px;border-left:3px solid var(--text3)">
+            <div><b>${_diag.interna}</b> <span style="color:var(--text3)">internos (excluidos de logística)</span></div>
+          </div>` : ''}
+
+          ${_diag.sinZona > 0 ? `
+          <div onclick="logisticaVerSinZona()" style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(224,123,42,.08);border-radius:4px;border-left:3px solid var(--yellow);cursor:pointer">
+            <div><b style="color:var(--yellow)">${_diag.sinZona}</b> <span style="color:var(--text3)">⚠️ sin zona asignada</span></div>
+            <span style="font-size:11px;color:var(--yellow);font-weight:700">VER →</span>
+          </div>` : ''}
+        </div>
+
+        <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;color:var(--text3);line-height:1.5">
+          <b>${_diag.conInsumosUnicos}</b> + <b>${_diag.duplicadosConIns}</b> + <b>${_diag.sinInsumosRaw}</b> + <b>${_diag.desinfeccionRaw}</b> + <b>${_diag.interna}</b> + <b>${_diag.sinZona}</b> = <b>${_diag.totalDocs}</b>
+        </div>
+      </div>
 
       <!-- Stats globales -->
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
@@ -6470,6 +6540,16 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
       <!-- Barra de progreso global -->
       <div style="background:var(--border);border-radius:6px;height:10px;margin-bottom:16px;overflow:hidden">
         <div style="background:var(--green);height:100%;width:${pct}%;border-radius:6px;transition:width .4s"></div>
+      </div>
+
+      <!-- Buscador de clientes -->
+      <div style="position:relative;margin-bottom:10px">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text3);pointer-events:none">🔍</span>
+        <input id="log-buscar" type="text" placeholder="Buscar cliente..." oninput="logisticaBuscar(this.value)"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 36px 9px 36px;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box">
+        <span id="log-buscar-clear" onclick="document.getElementById('log-buscar').value='';logisticaBuscar('');this.style.display='none'"
+          style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:16px;color:var(--text3);cursor:pointer;display:none;padding:2px 6px;border-radius:4px">✕</span>
+        <div id="log-buscar-count" style="font-size:11px;color:var(--text3);margin-top:4px;min-height:14px"></div>
       </div>
 
       <!-- Filtro zona -->
@@ -6493,8 +6573,9 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
           return ae - be || (a.cliente||'').localeCompare(b.cliente||'');
         }).map(s => {
           const ent = entregasMap[s._id];
+          const clienteNorm = (s.cliente||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
           return `
-          <div style="background:var(--surface);border:1px solid ${ent?'rgba(39,168,90,.3)':'var(--border)'};border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;opacity:${ent?'.75':'1'}">
+          <div data-cliente="${clienteNorm}" data-entregado="${ent?'1':'0'}" style="background:var(--surface);border:1px solid ${ent?'rgba(39,168,90,.3)':'var(--border)'};border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;opacity:${ent?'.75':'1'}">
             <div onclick="logisticaToggle('${s._id}','${(s.cliente||'').replace(/'/g,"\\'")}','${mes}')"
               style="width:28px;height:28px;border-radius:50%;border:2px solid ${ent?'var(--green)':'var(--border)'};background:${ent?'var(--green)':'transparent'};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .2s">
               ${ent?'<span style="color:#fff;font-size:14px">✓</span>':''}
@@ -6510,21 +6591,24 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
 
       <!-- Sección SIN INSUMOS colapsable -->
       ${sinInsumosDed.length > 0 ? `
-      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px">
+      <div id="log-sininsumos-wrap" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px">
         <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'"
           style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:var(--surface)">
           <span style="font-size:13px;font-weight:700;color:var(--text3)">⚪ SIN INSUMOS (${sinInsumosDed.length})</span>
           <span style="font-size:11px;color:var(--text3)">▼ ver listado</span>
         </div>
-        <div style="display:none;padding:8px 0">
-          ${sinInsumosDed.map(s=>`
-            <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center">
+        <div id="log-sininsumos" style="display:none;padding:8px 0">
+          ${sinInsumosDed.map(s=>{
+            const clienteNorm = (s.cliente||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            return `
+            <div data-cliente="${clienteNorm}" style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center">
               <span style="font-size:16px">⊘</span>
               <div>
                 <div style="font-size:13px;font-weight:500;color:var(--text3)">${s.cliente||'—'}</div>
                 ${s.direccion?`<div style="font-size:11px;color:var(--text3)">${s.direccion}</div>`:''}
               </div>
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>
       </div>` : ''}
 
@@ -6544,7 +6628,7 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
         <div style="background:var(--border);border-radius:6px;height:6px;margin-bottom:10px;overflow:hidden">
           <div style="background:var(--accent);height:100%;border-radius:6px;transition:width .4s;width:${desinfeccionDed.length > 0 ? Math.round(desinfeccionDed.filter(s=>entregasMap[s._id]).length / desinfeccionDed.length * 100) : 0}%"></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
+        <div id="log-desinfeccion" style="display:flex;flex-direction:column;gap:6px">
           ${desinfeccionDed.sort((a,b) => {
             const ae = entregasMap[a._id] ? 1 : 0;
             const be = entregasMap[b._id] ? 1 : 0;
@@ -6559,7 +6643,8 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
             const tagBg = ent ? 'var(--accent-light)' : 'var(--surface2)';
             const tagColor = ent ? 'var(--accent)' : 'var(--text3)';
             const clienteEsc = (s.cliente||'').replace(/'/g, "\'");
-            return '<div style="background:var(--surface);border:1px solid ' + borderColor + ';border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;opacity:' + opacityVal + '">'
+            const clienteNorm = (s.cliente||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            return '<div data-cliente="' + clienteNorm + '" style="background:var(--surface);border:1px solid ' + borderColor + ';border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;opacity:' + opacityVal + '">'
               + '<div onclick="logisticaToggle(&#39;' + s._id + '&#39;,&#39;' + clienteEsc + '&#39;,&#39;' + mes + '&#39;)" '
               + 'style="width:28px;height:28px;border-radius:50%;border:2px solid ' + circleBorder + ';background:' + circleBg + ';display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .2s">'
               + (ent ? '<span style="color:#fff;font-size:14px">✓</span>' : '')
@@ -6586,13 +6671,121 @@ function renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro) {
     </div>`;
 
   // Guardar estado para re-render tras toggle
-  window._logState = { servicios, entregasMap, mes, zonaFiltro };
+  window._logState = { servicios, entregasMap, mes, zonaFiltro, _diag };
+}
+
+function logisticaToggleDesglose() {
+  const p = document.getElementById('log-desglose');
+  if (!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function logisticaVerSinZona() {
+  const list = window._logState?._diag?.sinZonaList || [];
+  if (!list.length) { toast('No hay servicios sin zona', 'ok'); return; }
+
+  // Crear modal
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
+  box.innerHTML = `
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:800;font-size:15px;color:var(--yellow)">⚠️ Servicios sin zona</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${list.length} servicio${list.length!==1?'s':''} requieren asignación de zona</div>
+      </div>
+      <span onclick="this.closest('[data-modal-overlay]').remove()" style="font-size:22px;color:var(--text3);cursor:pointer;padding:2px 8px;border-radius:4px;user-select:none">✕</span>
+    </div>
+    <div style="overflow-y:auto;padding:10px 16px;flex:1">
+      ${list.map(s => `
+        <div style="padding:8px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="min-width:0;flex:1">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.cliente}</div>
+            ${s.direccion ? `<div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.direccion}</div>` : ''}
+          </div>
+          <span style="font-size:10px;font-weight:700;color:var(--yellow);background:rgba(224,123,42,.12);padding:3px 8px;border-radius:6px;white-space:nowrap">SIN ZONA</span>
+        </div>
+      `).join('')}
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);text-align:center">
+      Asigná la zona desde ABM Servicios → editar servicio → campo "Zona logística"
+    </div>
+  `;
+  overlay.setAttribute('data-modal-overlay', '1');
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 function logisticaCambiarZona() {
   const zona = document.getElementById('log-zona-sel').value;
   const { servicios, entregasMap, mes } = window._logState;
+  const buscarPrev = document.getElementById('log-buscar')?.value || '';
   renderLogisticaVista(servicios, entregasMap, mes, zona);
+  // Re-aplicar búsqueda tras re-render
+  if (buscarPrev) {
+    const inp = document.getElementById('log-buscar');
+    if (inp) {
+      inp.value = buscarPrev;
+      logisticaBuscar(buscarPrev);
+    }
+  }
+}
+
+function logisticaBuscar(q) {
+  const norm = (s) => (s||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const query = norm(q).trim();
+  const clearBtn = document.getElementById('log-buscar-clear');
+  if (clearBtn) clearBtn.style.display = query ? 'inline-block' : 'none';
+
+  let totalVisibles = 0;
+  let totalCoincide = 0;
+
+  // Filtrar lista principal (con insumos)
+  document.querySelectorAll('#log-lista [data-cliente]').forEach(el => {
+    const cliente = el.getAttribute('data-cliente') || '';
+    const match = !query || cliente.includes(query);
+    el.style.display = match ? '' : 'none';
+    if (match) totalCoincide++;
+  });
+
+  // Filtrar desinfección
+  document.querySelectorAll('#log-desinfeccion [data-cliente]').forEach(el => {
+    const cliente = el.getAttribute('data-cliente') || '';
+    const match = !query || cliente.includes(query);
+    el.style.display = match ? '' : 'none';
+    if (match) totalCoincide++;
+  });
+
+  // Filtrar sin insumos (si hay búsqueda, expandir automáticamente)
+  const sinInsumosBox = document.getElementById('log-sininsumos');
+  let coincSinIns = 0;
+  document.querySelectorAll('#log-sininsumos [data-cliente]').forEach(el => {
+    const cliente = el.getAttribute('data-cliente') || '';
+    const match = !query || cliente.includes(query);
+    el.style.display = match ? '' : 'none';
+    if (match && query) coincSinIns++;
+  });
+  // Expandir SIN INSUMOS si hay coincidencias en él
+  if (sinInsumosBox && query && coincSinIns > 0) {
+    sinInsumosBox.style.display = 'block';
+  }
+  totalCoincide += coincSinIns;
+
+  // Mostrar contador
+  const contador = document.getElementById('log-buscar-count');
+  if (contador) {
+    if (query) {
+      contador.textContent = totalCoincide === 0
+        ? `Sin resultados para "${q}"`
+        : `${totalCoincide} resultado${totalCoincide!==1?'s':''}`;
+      contador.style.color = totalCoincide === 0 ? 'var(--red)' : 'var(--text3)';
+    } else {
+      contador.textContent = '';
+    }
+  }
 }
 
 async function logisticaToggle(servicioId, nombreServicio, mes) {
@@ -6618,7 +6811,16 @@ async function logisticaToggle(servicioId, nombreServicio, mes) {
 
   invalidarCache('horas_entregas');
   const { zonaFiltro } = window._logState;
+  const buscarPrev = document.getElementById('log-buscar')?.value || '';
   renderLogisticaVista(servicios, entregasMap, mes, zonaFiltro);
+  // Re-aplicar búsqueda tras re-render
+  if (buscarPrev) {
+    const inp = document.getElementById('log-buscar');
+    if (inp) {
+      inp.value = buscarPrev;
+      logisticaBuscar(buscarPrev);
+    }
+  }
 }
 
 // ════════════════════════════════════════════
