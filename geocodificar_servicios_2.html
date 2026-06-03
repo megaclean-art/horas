@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geocodificar servicios · MegaClean</title>
+<style>
+:root {
+  --accent: #0a7ec0;
+  --green: #2e7d32;
+  --red: #c62828;
+  --yellow: #e07b2a;
+  --text: #1a2436;
+  --text2: #556173;
+  --text3: #8a96a7;
+  --border: #d8dee7;
+  --surface: #f6f8fb;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, system-ui, sans-serif;
+  background: #eef2f7;
+  color: var(--text);
+  padding: 16px;
+}
+.container { max-width: 880px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: var(--text2); font-size: 14px; margin-bottom: 18px; }
+.card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; font-weight: 600; }
+.field input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+}
+.field input:focus { border-color: var(--accent); }
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-sec { background: #e8eef3; color: var(--text); }
+.btn-ok { background: var(--green); }
+.btn-warn { background: var(--yellow); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.stat {
+  background: var(--surface);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  flex: 1;
+  min-width: 120px;
+  text-align: center;
+}
+.stat strong { display: block; font-size: 22px; color: var(--accent); }
+.stat.ok strong { color: var(--green); }
+.stat.fail strong { color: var(--red); }
+.log {
+  background: #0f1419;
+  color: #b6c2cf;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log .ok { color: #7ec699; }
+.log .fail { color: #ff7575; }
+.log .info { color: #6cb6ff; }
+.progress {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+.progress-bar { height: 100%; background: var(--accent); transition: width .3s; }
+.hidden { display: none !important; }
+.warn-box {
+  background: rgba(224,123,42,.08);
+  border: 1.5px solid rgba(224,123,42,.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🌍 Geocodificar servicios</h1>
+  <div class="sub">Carga lat/lon en los servicios de Firestore usando Nominatim (OpenStreetMap). Solo procesa los que no tienen coordenadas.</div>
+
+  <!-- LOGIN -->
+  <div class="card" id="card-login">
+    <div class="field">
+      <label>DNI (o "admin")</label>
+      <input id="dni" type="text" placeholder="Ej: 25365716 o admin" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input id="password" type="password" autocomplete="current-password">
+    </div>
+    <button class="btn" onclick="iniciarSesion()">🔑 Ingresar</button>
+    <div style="font-size:12px;color:var(--text3);margin-top:8px">Las mismas credenciales que usás para entrar a MegaClean Gestión de Horas.</div>
+    <div id="login-error" style="color:var(--red);font-size:13px;margin-top:8px"></div>
+  </div>
+
+  <!-- TRABAJO -->
+  <div class="card hidden" id="card-trabajo">
+    <div class="warn-box">
+      ⚠ Este script consulta Nominatim a 1 req/segundo (límite del servicio). Para muchos servicios puede tardar varios minutos. No cierres la pestaña hasta que termine.
+    </div>
+
+    <div class="row" style="margin-bottom:14px">
+      <div class="stat"><strong id="stat-total">—</strong>Total</div>
+      <div class="stat"><strong id="stat-coord">—</strong>Con coord.</div>
+      <div class="stat"><strong id="stat-pend">—</strong>Pendientes</div>
+      <div class="stat ok"><strong id="stat-ok">0</strong>Geolocalizados</div>
+      <div class="stat fail"><strong id="stat-fail">0</strong>Fallidos</div>
+    </div>
+
+    <div class="row">
+      <button class="btn" id="btn-cargar" onclick="cargarServicios()">📥 Cargar servicios</button>
+      <button class="btn btn-warn hidden" id="btn-geocodificar" onclick="empezarGeocodificacion()">🌍 Empezar geocodificación</button>
+      <button class="btn btn-ok hidden" id="btn-guardar" onclick="guardarResultados()">💾 Guardar en Firestore</button>
+      <button class="btn btn-sec hidden" id="btn-reintentar" onclick="reintentarFallidos()">🔄 Reintentar fallidos</button>
+    </div>
+
+    <div class="progress hidden" id="progress-wrap">
+      <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+    </div>
+
+    <div class="log hidden" id="log"></div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════
+//  CONFIG (idéntica a la app principal)
+// ════════════════════════════════════════════
+const FB_CONFIG = {
+  apiKey: "AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng",
+  projectId: "mega-clean-12f17"
+};
+const API = `https://firestore.googleapis.com/v1/projects/${FB_CONFIG.projectId}/databases/(default)/documents`;
+
+let idToken = null;
+let servicios = [];      // todos los servicios
+let pendientes = [];     // los que no tienen lat/lon
+let geocodificados = []; // resultados {_id, lat, lon, direccion, cliente}
+let fallidos = [];       // {_id, direccion, cliente}
+
+// ════════════════════════════════════════════
+//  HELPERS DE LOG
+// ════════════════════════════════════════════
+function log(msg, type='') {
+  const el = document.getElementById('log');
+  el.classList.remove('hidden');
+  const ts = new Date().toTimeString().slice(0,8);
+  const span = document.createElement('span');
+  if (type) span.className = type;
+  span.textContent = `[${ts}] ${msg}\n`;
+  el.appendChild(span);
+  el.scrollTop = el.scrollHeight;
+}
+function setProgress(pct) {
+  document.getElementById('progress-wrap').classList.remove('hidden');
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+function setStat(id, val) { document.getElementById(id).textContent = val; }
+
+// ════════════════════════════════════════════
+//  AUTH (misma lógica que doLogin de la app principal)
+// ════════════════════════════════════════════
+async function iniciarSesion() {
+  const dni = document.getElementById('dni').value.trim();
+  const password = document.getElementById('password').value;
+  const err = document.getElementById('login-error');
+  err.textContent = '';
+  if (!dni || !password) return err.textContent = 'Completá DNI y contraseña';
+
+  const dniLower = dni.toLowerCase();
+  // Construye el email interno igual que en la app
+  const email = (dniLower === 'admin' ? 'admin' : dni) + '@megaclean.com.ar';
+
+  try {
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FB_CONFIG.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    });
+    const data = await r.json();
+    if (r.ok && data.idToken) {
+      idToken = data.idToken;
+      mostrarTrabajo('✓ Sesión iniciada con Firebase Auth');
+      return;
+    }
+    // Fallback: admin hardcoded (no siempre está registrado en Firebase Auth)
+    const adminOk = (dniLower === 'admin' && password === 'admin1234') ||
+                    (dni === '25365716' && password === '1945');
+    if (adminOk) {
+      idToken = null; // sin token; las reglas de Firestore permiten igual
+      mostrarTrabajo('✓ Sesión iniciada (modo admin legacy, sin token)');
+      return;
+    }
+    err.textContent = 'Login fallido: ' + (data.error?.message || 'Verificá DNI y contraseña');
+  } catch (e) {
+    err.textContent = 'Error de red: ' + e.message;
+  }
+}
+
+function mostrarTrabajo(msg) {
+  document.getElementById('card-login').classList.add('hidden');
+  document.getElementById('card-trabajo').classList.remove('hidden');
+  log(msg, 'ok');
+}
+
+// ════════════════════════════════════════════
+//  FIRESTORE HELPERS (versión simplificada solo para este script)
+// ════════════════════════════════════════════
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (idToken) h['Authorization'] = 'Bearer ' + idToken;
+  return h;
+}
+
+function fromFS(doc) {
+  if (!doc.fields) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(doc.fields)) {
+    if (v.stringValue !== undefined) out[k] = v.stringValue;
+    else if (v.integerValue !== undefined) out[k] = Number(v.integerValue);
+    else if (v.doubleValue !== undefined) out[k] = v.doubleValue;
+    else if (v.booleanValue !== undefined) out[k] = v.booleanValue;
+    else if (v.nullValue !== undefined) out[k] = null;
+  }
+  return out;
+}
+
+async function fsListAll(col) {
+  const docs = [];
+  let pageToken = null;
+  do {
+    const url = `${API}/${col}?pageSize=300${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) throw new Error(`Firestore ${r.status}`);
+    const data = await r.json();
+    for (const d of (data.documents || [])) {
+      const obj = fromFS(d);
+      obj._id = d.name.split('/').pop();
+      docs.push(obj);
+    }
+    pageToken = data.nextPageToken || null;
+  } while (pageToken);
+  return docs;
+}
+
+// PATCH parcial actualizando los campos provistos (usa updateMask por campo)
+async function fsUpdateServicio(id, campos) {
+  const fields = {};
+  for (const [k, v] of Object.entries(campos)) {
+    fields[k] = { stringValue: String(v) };
+  }
+  const masks = Object.keys(campos).map(k => `updateMask.fieldPaths=${k}`).join('&');
+  const url = `${API}/horas_servicios/${id}?${masks}`;
+  const r = await fetch(url, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ fields }) });
+  return r.ok;
+}
+
+// ════════════════════════════════════════════
+//  CARGA DE SERVICIOS
+// ════════════════════════════════════════════
+async function cargarServicios() {
+  document.getElementById('btn-cargar').disabled = true;
+  log('Cargando servicios desde Firestore...', 'info');
+  try {
+    servicios = await fsListAll('horas_servicios');
+    log(`✓ ${servicios.length} servicios cargados`, 'ok');
+
+    const conCoord = servicios.filter(s => {
+      const la = parseFloat(s.lat), lo = parseFloat(s.lon);
+      return !isNaN(la) && !isNaN(lo) && la !== 0 && lo !== 0;
+    });
+    pendientes = servicios.filter(s => {
+      const la = parseFloat(s.lat), lo = parseFloat(s.lon);
+      return (isNaN(la) || isNaN(lo) || la === 0 || lo === 0) && (s.direccion||'').trim();
+    });
+    const sinDir = servicios.length - conCoord.length - pendientes.length;
+
+    setStat('stat-total', servicios.length);
+    setStat('stat-coord', conCoord.length);
+    setStat('stat-pend', pendientes.length);
+
+    log(`  • ${conCoord.length} ya tienen coordenadas`, 'ok');
+    log(`  • ${pendientes.length} pendientes de geocodificar`, 'info');
+    if (sinDir > 0) log(`  • ${sinDir} sin dirección (no geocodificables)`, 'fail');
+
+    if (pendientes.length === 0) {
+      log('No hay servicios para procesar. Todo listo.', 'ok');
+      document.getElementById('btn-cargar').disabled = false;
+      return;
+    }
+    document.getElementById('btn-geocodificar').classList.remove('hidden');
+  } catch (e) {
+    log('✗ Error cargando: ' + e.message, 'fail');
+    document.getElementById('btn-cargar').disabled = false;
+  }
+}
+
+// ════════════════════════════════════════════
+//  LIMPIEZA Y NORMALIZACIÓN DE DIRECCIONES
+// ════════════════════════════════════════════
+// Saca info extra (lote, piso, oficina, paréntesis, comentarios después de guión)
+// y deja calle + número de altura. Si no hay número, devuelve la dirección tal cual.
+function limpiarDireccion(dir) {
+  let d = (dir || '').trim();
+  if (!d) return '';
+  // 1. Sacar contenido entre paréntesis o corchetes
+  d = d.replace(/[\(\[][^\)\]]*[\)\]]/g, ' ');
+  // 2. Cortar después de número + guión/coma + cualquier cosa (típico comentario)
+  d = d.replace(/(\d)\s*[-–,].*$/, '$1');
+  // 3. Cortar en palabras clave de comentario
+  d = d.split(/\s+(?:lote|piso|of\.?|oficina|dpto\.?|depto\.?|departamento|local|esquina|esq\.?|para\s+cobrar|cobrar|altura|al\s+fondo|fondo|atras|atrás|frente|entre\s+calles?|entrar|ingreso)\b/i)[0];
+  // 4. Quedarse solo con "calle + número de altura" si lo encontramos
+  const m = d.match(/^(.+?\s+\d+[a-zA-Z]?)(?:\s|$)/);
+  if (m) d = m[1];
+  // 5. Normalizar espacios y devolver
+  return d.replace(/\s+/g, ' ').trim();
+}
+
+// Expande abreviaturas típicas argentinas
+function expandirAbreviaturas(dir) {
+  return (dir||'')
+    .replace(/\bAv\.?(?=\s)/gi, 'Avenida')
+    .replace(/\bBv\.?(?=\s)/gi, 'Bulevar')
+    .replace(/\bPje\.?(?=\s)/gi, 'Pasaje')
+    .replace(/\bGral\.?(?=\s)/gi, 'General')
+    .replace(/\bDr\.?(?=\s)/gi, 'Doctor')
+    .replace(/\bIng\.?(?=\s)/gi, 'Ingeniero')
+    .replace(/\bPdte\.?(?=\s)/gi, 'Presidente')
+    .replace(/\bSta\.?(?=\s)/gi, 'Santa')
+    .replace(/\bSto\.?(?=\s)/gi, 'Santo');
+}
+
+// ════════════════════════════════════════════
+//  GEOCODIFICACIÓN (Nominatim)
+// ════════════════════════════════════════════
+// Llamada cruda a Nominatim — no toca la query
+async function geocodificarNominatim(query) {
+  if (!query || query.length < 3) return null;
+  let q = query.trim();
+  if (!/c[oó]rdoba/i.test(q)) q += ', Córdoba, Argentina';
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=ar`, {
+      headers: { 'Accept-Language': 'es' }
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return { lat: String(data[0].lat), lon: String(data[0].lon) };
+  } catch {
+    return null;
+  }
+}
+
+// Modo simple: una sola request con la dirección ya limpia y abreviaturas expandidas.
+// Devuelve también la versión RECORTADA (sin expandir abreviaturas) para guardarla como
+// nuevo valor de `direccion` preservando el estilo original (Av., Bv., etc.)
+async function geocodificarSimple(direccion) {
+  const recortada = limpiarDireccion(direccion);
+  const query = expandirAbreviaturas(recortada);
+  if (!query) return null;
+  const coord = await geocodificarNominatim(query);
+  if (coord) return { ...coord, varianteUsada: query, direccionRecortada: recortada };
+  return null;
+}
+
+// Modo cascada: prueba hasta 3 variantes con pausas de 1.1s entre intentos.
+// Cada variante tiene su propia `direccionRecortada` asociada, así sabemos qué
+// versión del texto guardar como `direccion` final según cuál variante funcionó.
+async function geocodificarCascada(direccion) {
+  const recortada = limpiarDireccion(direccion);
+  const orig = direccion.trim();
+  const variantes = [
+    { q: expandirAbreviaturas(recortada), recortada: recortada },
+    { q: expandirAbreviaturas(orig), recortada: orig },
+    { q: orig, recortada: orig }
+  ];
+  const seen = new Set();
+  const unicas = variantes.filter(v => {
+    if (!v.q || v.q.length < 3 || seen.has(v.q)) return false;
+    seen.add(v.q); return true;
+  });
+  for (let i = 0; i < unicas.length; i++) {
+    const v = unicas[i];
+    const coord = await geocodificarNominatim(v.q);
+    if (coord) return { ...coord, varianteUsada: v.q, direccionRecortada: v.recortada };
+    if (i < unicas.length - 1) await new Promise(r => setTimeout(r, 1100));
+  }
+  return null;
+}
+
+// Calcula la "diferencia textual" entre la original y la recortada para usar como observaciones.
+// Si la recortada es substring de la original, devuelve el resto. Si no, devuelve la original entera.
+function calcularObservaciones(original, recortada) {
+  if (!original || !recortada || original === recortada) return '';
+  if (original.includes(recortada)) {
+    return original.split(recortada).join(' ')
+      .replace(/^[\s,\-–]+|[\s,\-–]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return original;
+}
+
+async function empezarGeocodificacion(modoCascada = false) {
+  document.getElementById('btn-geocodificar').disabled = true;
+  document.getElementById('btn-cargar').disabled = true;
+  document.getElementById('btn-reintentar').classList.add('hidden');
+
+  if (!modoCascada) {
+    // Pasada nueva: resetear todo
+    geocodificados = [];
+    fallidos = [];
+    setStat('stat-ok', 0);
+    setStat('stat-fail', 0);
+  } else {
+    // Reintento: conservar geocodificados, resetear solo fallidos
+    fallidos = [];
+    setStat('stat-fail', 0);
+  }
+
+  const total = pendientes.length;
+  log(`Procesando ${total} servicios... (${modoCascada ? 'modo cascada con variantes' : 'modo simple con limpieza'})`, 'info');
+
+  for (let i = 0; i < pendientes.length; i++) {
+    const s = pendientes[i];
+    const pct = Math.round(((i+1) / total) * 100);
+    setProgress(pct);
+
+    const result = modoCascada
+      ? await geocodificarCascada(s.direccion)
+      : await geocodificarSimple(s.direccion);
+
+    if (result) {
+      const direccionOriginal = s.direccion.trim();
+      const obsOriginal = (s.direccionObs || '').trim();
+      const recortada = result.direccionRecortada || direccionOriginal;
+
+      // Cambiar texto SOLO si la limpieza tuvo efecto Y no hay observaciones manuales previas
+      let direccionNueva = direccionOriginal;
+      let obsNueva = obsOriginal;
+      let cambioTexto = false;
+      if (recortada && recortada !== direccionOriginal && !obsOriginal) {
+        direccionNueva = recortada;
+        obsNueva = calcularObservaciones(direccionOriginal, recortada);
+        cambioTexto = true;
+      }
+
+      geocodificados.push({
+        _id: s._id,
+        lat: result.lat,
+        lon: result.lon,
+        cliente: s.cliente,
+        direccionOriginal,
+        direccionNueva,
+        obsNueva,
+        cambioTexto
+      });
+      const usadaTxt = (result.varianteUsada && result.varianteUsada !== direccionOriginal)
+        ? ` [via: "${result.varianteUsada}"]` : '';
+      const obsTxt = cambioTexto ? ` · 📝 obs: "${obsNueva}"` : '';
+      log(`✓ ${s.cliente||'—'} | ${direccionOriginal}${usadaTxt}${obsTxt} → ${result.lat}, ${result.lon}`, 'ok');
+      setStat('stat-ok', geocodificados.length);
+    } else {
+      fallidos.push({ _id: s._id, direccion: s.direccion, cliente: s.cliente });
+      log(`✗ ${s.cliente||'—'} | ${s.direccion} → no encontrado`, 'fail');
+      setStat('stat-fail', fallidos.length);
+    }
+
+    // Respetar rate limit de Nominatim (excepto en el último)
+    if (i < pendientes.length - 1) await new Promise(r => setTimeout(r, 1100));
+  }
+
+  log(`──────────────────────────────`, 'info');
+  log(`Geocodificación terminada · ${geocodificados.length} ok · ${fallidos.length} fallidos`, 'info');
+
+  if (geocodificados.length > 0) {
+    document.getElementById('btn-guardar').classList.remove('hidden');
+  }
+  if (fallidos.length > 0) {
+    document.getElementById('btn-reintentar').classList.remove('hidden');
+    document.getElementById('btn-reintentar').disabled = false;
+  }
+}
+
+async function reintentarFallidos() {
+  if (fallidos.length === 0) return;
+  pendientes = fallidos.slice();
+  log(`Reintentando ${pendientes.length} fallidos con modo cascada (hasta 3 variantes por dirección)...`, 'info');
+  await empezarGeocodificacion(true);
+}
+
+// ════════════════════════════════════════════
+//  GUARDAR EN FIRESTORE
+// ════════════════════════════════════════════
+async function guardarResultados() {
+  if (geocodificados.length === 0) return;
+  document.getElementById('btn-guardar').disabled = true;
+  const conTexto = geocodificados.filter(g => g.cambioTexto).length;
+  log(`Guardando ${geocodificados.length} servicios en Firestore (${conTexto} con dirección+observaciones reorganizadas)...`, 'info');
+
+  let ok = 0, fail = 0;
+  for (let i = 0; i < geocodificados.length; i++) {
+    const g = geocodificados[i];
+    setProgress(Math.round(((i+1) / geocodificados.length) * 100));
+    const campos = { lat: g.lat, lon: g.lon };
+    if (g.cambioTexto) {
+      campos.direccion = g.direccionNueva;
+      campos.direccionObs = g.obsNueva;
+    }
+    const success = await fsUpdateServicio(g._id, campos);
+    if (success) {
+      ok++;
+      log(`  ✓ ${g.cliente} guardado${g.cambioTexto ? ' (dirección + obs)' : ''}`, 'ok');
+    } else {
+      fail++;
+      log(`  ✗ ${g.cliente} ERROR al guardar`, 'fail');
+    }
+    if (i < geocodificados.length - 1) await new Promise(r => setTimeout(r, 80));
+  }
+
+  log(`──────────────────────────────`, 'info');
+  log(`Guardado · ${ok} actualizados · ${fail} fallaron`, ok > 0 ? 'ok' : 'fail');
+  if (fail === 0) {
+    log(`✅ Todo listo. Cerrá esta pestaña y volvé a la app principal.`, 'ok');
+  }
+}
+</script>
+</body>
+</html>
