@@ -134,6 +134,11 @@ h1 { font-size: 22px; margin: 0 0 4px; }
       ⚠ Este script consulta Nominatim a 1 req/segundo (límite del servicio). Para muchos servicios puede tardar varios minutos. No cierres la pestaña hasta que termine.
     </div>
 
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;background:var(--surface);padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px">
+      <input type="checkbox" id="cb-reproc" style="margin:0">
+      <span>Re-procesar también los servicios con coordenadas <strong>fuera de Córdoba</strong> (recomendado si ya corriste el script antes con resultados sospechosos)</span>
+    </label>
+
     <div class="row" style="margin-bottom:14px">
       <div class="stat"><strong id="stat-total">—</strong>Total</div>
       <div class="stat"><strong id="stat-coord">—</strong>Con coord.</div>
@@ -300,23 +305,35 @@ async function cargarServicios() {
     servicios = await fsListAll('horas_servicios');
     log(`✓ ${servicios.length} servicios cargados`, 'ok');
 
-    const conCoord = servicios.filter(s => {
+    const conCoordOk = servicios.filter(s => {
       const la = parseFloat(s.lat), lo = parseFloat(s.lon);
-      return !isNaN(la) && !isNaN(lo) && la !== 0 && lo !== 0;
+      return !isNaN(la) && !isNaN(lo) && la !== 0 && lo !== 0 && estaEnCordoba(la, lo);
     });
-    pendientes = servicios.filter(s => {
+    const conCoordFuera = servicios.filter(s => {
+      const la = parseFloat(s.lat), lo = parseFloat(s.lon);
+      return !isNaN(la) && !isNaN(lo) && la !== 0 && lo !== 0 && !estaEnCordoba(la, lo);
+    });
+    const sinCoord = servicios.filter(s => {
       const la = parseFloat(s.lat), lo = parseFloat(s.lon);
       return (isNaN(la) || isNaN(lo) || la === 0 || lo === 0) && (s.direccion||'').trim();
     });
-    const sinDir = servicios.length - conCoord.length - pendientes.length;
+    const sinDir = servicios.length - conCoordOk.length - conCoordFuera.length - sinCoord.length;
+
+    const reprocesarFuera = document.getElementById('cb-reproc')?.checked;
+    pendientes = reprocesarFuera ? [...sinCoord, ...conCoordFuera] : [...sinCoord];
 
     setStat('stat-total', servicios.length);
-    setStat('stat-coord', conCoord.length);
+    setStat('stat-coord', conCoordOk.length);
     setStat('stat-pend', pendientes.length);
 
-    log(`  • ${conCoord.length} ya tienen coordenadas`, 'ok');
-    log(`  • ${pendientes.length} pendientes de geocodificar`, 'info');
+    log(`  • ${conCoordOk.length} ya tienen coordenadas dentro de Córdoba`, 'ok');
+    if (conCoordFuera.length > 0) {
+      log(`  • ${conCoordFuera.length} tienen coordenadas FUERA de Córdoba (sospechosas)`, 'fail');
+      if (!reprocesarFuera) log(`    → marcá el checkbox para re-procesarlas`, 'info');
+    }
+    log(`  • ${sinCoord.length} sin coordenadas`, 'info');
     if (sinDir > 0) log(`  • ${sinDir} sin dirección (no geocodificables)`, 'fail');
+    log(`Total a procesar: ${pendientes.length}`, 'info');
 
     if (pendientes.length === 0) {
       log('No hay servicios para procesar. Todo listo.', 'ok');
@@ -366,21 +383,45 @@ function expandirAbreviaturas(dir) {
 }
 
 // ════════════════════════════════════════════
+//  BOUNDING BOX DE CÓRDOBA + CONTEXTO POR ZONA
+// ════════════════════════════════════════════
+// Caja generosa: cubre Córdoba Capital, Villa Allende, Villa Carlos Paz y alrededores
+const BBOX_CORDOBA = { minLat: -32.0, maxLat: -31.0, minLon: -64.7, maxLon: -63.7 };
+function estaEnCordoba(lat, lon) {
+  const la = parseFloat(lat), lo = parseFloat(lon);
+  return !isNaN(la) && !isNaN(lo) &&
+         la >= BBOX_CORDOBA.minLat && la <= BBOX_CORDOBA.maxLat &&
+         lo >= BBOX_CORDOBA.minLon && lo <= BBOX_CORDOBA.maxLon;
+}
+// Contexto geográfico para desambiguar resultados (CP + ciudad)
+function contextoUbicacion(zona) {
+  const z = (zona||'').trim();
+  if (z === 'Villa Allende') return '5105 Villa Allende, Córdoba, Argentina';
+  if (z === 'Carlos Paz') return '5152 Villa Carlos Paz, Córdoba, Argentina';
+  return '5000 Córdoba, Argentina'; // Capital por defecto
+}
+
+// ════════════════════════════════════════════
 //  GEOCODIFICACIÓN (Nominatim)
 // ════════════════════════════════════════════
-// Llamada cruda a Nominatim — no toca la query
-async function geocodificarNominatim(query) {
+// Llama a Nominatim con el contexto correcto y filtra resultados que estén dentro
+// del bounding box de Córdoba. Devuelve el primer resultado válido o null.
+async function geocodificarNominatim(query, zona) {
   if (!query || query.length < 3) return null;
-  let q = query.trim();
-  if (!/c[oó]rdoba/i.test(q)) q += ', Córdoba, Argentina';
+  const ctx = contextoUbicacion(zona);
+  const q = `${query.trim()}, ${ctx}`;
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=ar`, {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=ar`, {
       headers: { 'Accept-Language': 'es' }
     });
     if (!r.ok) return null;
     const data = await r.json();
     if (!Array.isArray(data) || data.length === 0) return null;
-    return { lat: String(data[0].lat), lon: String(data[0].lon) };
+    // Tomar el primer resultado que esté dentro de Córdoba
+    for (const d of data) {
+      if (estaEnCordoba(d.lat, d.lon)) return { lat: String(d.lat), lon: String(d.lon) };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -389,19 +430,17 @@ async function geocodificarNominatim(query) {
 // Modo simple: una sola request con la dirección ya limpia y abreviaturas expandidas.
 // Devuelve también la versión RECORTADA (sin expandir abreviaturas) para guardarla como
 // nuevo valor de `direccion` preservando el estilo original (Av., Bv., etc.)
-async function geocodificarSimple(direccion) {
+async function geocodificarSimple(direccion, zona) {
   const recortada = limpiarDireccion(direccion);
   const query = expandirAbreviaturas(recortada);
   if (!query) return null;
-  const coord = await geocodificarNominatim(query);
+  const coord = await geocodificarNominatim(query, zona);
   if (coord) return { ...coord, varianteUsada: query, direccionRecortada: recortada };
   return null;
 }
 
 // Modo cascada: prueba hasta 3 variantes con pausas de 1.1s entre intentos.
-// Cada variante tiene su propia `direccionRecortada` asociada, así sabemos qué
-// versión del texto guardar como `direccion` final según cuál variante funcionó.
-async function geocodificarCascada(direccion) {
+async function geocodificarCascada(direccion, zona) {
   const recortada = limpiarDireccion(direccion);
   const orig = direccion.trim();
   const variantes = [
@@ -416,7 +455,7 @@ async function geocodificarCascada(direccion) {
   });
   for (let i = 0; i < unicas.length; i++) {
     const v = unicas[i];
-    const coord = await geocodificarNominatim(v.q);
+    const coord = await geocodificarNominatim(v.q, zona);
     if (coord) return { ...coord, varianteUsada: v.q, direccionRecortada: v.recortada };
     if (i < unicas.length - 1) await new Promise(r => setTimeout(r, 1100));
   }
@@ -462,8 +501,8 @@ async function empezarGeocodificacion(modoCascada = false) {
     setProgress(pct);
 
     const result = modoCascada
-      ? await geocodificarCascada(s.direccion)
-      : await geocodificarSimple(s.direccion);
+      ? await geocodificarCascada(s.direccion, s.zona)
+      : await geocodificarSimple(s.direccion, s.zona);
 
     if (result) {
       const direccionOriginal = s.direccion.trim();
