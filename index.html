@@ -937,8 +937,8 @@ const TABS = {
   SUPERVISOR: [
     { id: 'sup-dashboard', icon: '📊', label: 'Dashboard' },
     { id: 'sup-fichadas', icon: '🔍', label: 'Control' },
-    { id: 'sup-operarios', icon: '👷', label: 'Operarios' },
-    { id: 'sup-servicios', icon: '🏢', label: 'Servicios' },
+    { id: 'operarios', icon: '👷', label: 'Operarios' },
+    { id: 'servicios', icon: '🏢', label: 'Servicios' },
     { id: 'coberturas', icon: '🔄', label: 'Coberturas' },
     { id: 'feriados', icon: '📅', label: 'Feriados' },
     { id: 'reportes', icon: '📈', label: 'Reportes' },
@@ -1636,11 +1636,12 @@ async function renderOperarios() {
 
   c.innerHTML = `
     <div class="section-title">Operarios</div>
-    <div class="section-sub">Gestión de usuarios del sistema</div>
+    <div class="section-sub">${currentUser.rol === 'ADMIN' ? 'Gestión de usuarios del sistema' : 'Listado de operarios y supervisores'}</div>
+    ${currentUser.rol === 'ADMIN' ? `
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn-primary" style="flex:1;min-width:160px" onclick="modalOperario()">+ NUEVO OPERARIO</button>
       <button class="btn-secondary" style="flex:1;min-width:160px" onclick="renderGestionAccesos()">🔑 GESTIÓN DE ACCESOS</button>
-    </div>
+    </div>` : ''}
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <input id="op-buscar" placeholder="🔍 Buscar operario o DNI..." oninput="filtrarOperarios()"
         style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none">
@@ -1683,8 +1684,9 @@ function filtrarOperarios() {
           </div>
           <div class="list-item-actions">
             <button class="btn-icon" title="Ver detalle" onclick="verOperario('${o._id}')">👁</button>
+            ${currentUser.rol === 'ADMIN' ? `
             <button class="btn-icon edit" title="Editar" onclick="modalOperario('${o._id}')">✏️</button>
-            <button class="btn-icon" title="Eliminar" onclick="eliminarOperario('${o._id}','${o.nombre}')">🗑</button>
+            <button class="btn-icon" title="Eliminar" onclick="eliminarOperario('${o._id}','${o.nombre}')">🗑</button>` : ''}
           </div>
         </div>`).join('')
     }
@@ -1914,8 +1916,8 @@ async function renderServicios() {
 
   c.innerHTML = `
     <div class="section-title">Servicios</div>
-    <div class="section-sub">ABM de objetivos y asignaciones</div>
-    <button class="btn-primary" style="margin-bottom:14px" onclick="modalServicio()">+ NUEVO SERVICIO</button>
+    <div class="section-sub">${currentUser.rol === 'ADMIN' ? 'ABM de objetivos y asignaciones' : 'Listado completo de objetivos'}</div>
+    ${currentUser.rol === 'ADMIN' ? `<button class="btn-primary" style="margin-bottom:14px" onclick="modalServicio()">+ NUEVO SERVICIO</button>` : ''}
 
     <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
       <input id="srv-buscar" placeholder="🔍 Buscar cliente..." oninput="filtrarServicios()"
@@ -2015,8 +2017,9 @@ function filtrarServicios() {
         </div>
         <div class="list-item-actions" style="flex-shrink:0">
           <button class="btn-icon" title="Ver detalle" onclick="verServicio('${primerIdStr}')">👁</button>
+          ${currentUser.rol === 'ADMIN' ? `
           <button class="btn-icon edit" title="Editar" onclick="modalServicio('${primerIdStr}')">✏️</button>
-          <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>
+          <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>` : ''}
         </div>
       </div>`;
     }).join('')}
