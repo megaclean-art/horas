@@ -1059,9 +1059,24 @@ function distanciaMetros(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+// ── BOUNDING BOX DE CÓRDOBA Y CONTEXTO POR ZONA ──
+// Filtra resultados de Nominatim que caen fuera del área metropolitana de Córdoba.
+const BBOX_CORDOBA = { minLat: -32.0, maxLat: -31.0, minLon: -64.7, maxLon: -63.7 };
+function estaEnCordoba(lat, lon) {
+  const la = parseFloat(lat), lo = parseFloat(lon);
+  return !isNaN(la) && !isNaN(lo) &&
+         la >= BBOX_CORDOBA.minLat && la <= BBOX_CORDOBA.maxLat &&
+         lo >= BBOX_CORDOBA.minLon && lo <= BBOX_CORDOBA.maxLon;
+}
+function contextoUbicacion(zona) {
+  const z = (zona||'').trim();
+  if (z === 'Villa Allende') return '5105 Villa Allende, Córdoba, Argentina';
+  if (z === 'Carlos Paz') return '5152 Villa Carlos Paz, Córdoba, Argentina';
+  return '5000 Córdoba, Argentina';
+}
+
 // ── GEOCODIFICACIÓN (Nominatim/OSM) ──
-// Limpia la dirección antes de mandarla: saca paréntesis, "lote", "piso", "of", comentarios
-// después de guión/coma, y expande abreviaturas comunes (Av., Bv., Pje., etc.)
+// Limpia la dirección, agrega CP+ciudad como contexto y descarta resultados fuera del bbox.
 function _limpiarDir(dir) {
   let d = (dir || '').trim();
   if (!d) return '';
@@ -1084,32 +1099,37 @@ function _expandirAbrev(dir) {
     .replace(/\bSta\.?(?=\s)/gi, 'Santa')
     .replace(/\bSto\.?(?=\s)/gi, 'Santo');
 }
-async function _geocodNominatim(query) {
+async function _geocodNominatim(query, zona) {
   if (!query || query.length < 3) return null;
-  let q = query.trim();
-  if (!/c[oó]rdoba/i.test(q)) q += ', Córdoba, Argentina';
+  const ctx = contextoUbicacion(zona);
+  const q = `${query.trim()}, ${ctx}`;
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=ar`, {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=ar`, {
       headers: { 'Accept-Language': 'es' }
     });
     if (!r.ok) return null;
     const data = await r.json();
     if (!Array.isArray(data) || data.length === 0) return null;
-    return { lat: String(data[0].lat), lon: String(data[0].lon) };
+    for (const d of data) {
+      if (estaEnCordoba(d.lat, d.lon)) return { lat: String(d.lat), lon: String(d.lon) };
+    }
+    return null;
   } catch { return null; }
 }
-// Devuelve {lat, lon} o null. Prueba primero la versión limpia, después la original con
-// abreviaturas expandidas, después la original cruda.
-async function geocodificarDireccion(direccion) {
+// Devuelve {lat, lon} o null. Prueba primero la versión limpia + expandida, después la
+// original expandida, y por último la original cruda. Descarta resultados fuera del bbox.
+async function geocodificarDireccion(direccion, zona) {
   if (!direccion || !direccion.trim()) return null;
+  const recortada = _limpiarDir(direccion);
+  const orig = direccion.trim();
   const variantes = [
-    _expandirAbrev(_limpiarDir(direccion)),
-    _expandirAbrev(direccion.trim()),
-    direccion.trim()
+    _expandirAbrev(recortada),
+    _expandirAbrev(orig),
+    orig
   ];
   const unicas = [...new Set(variantes.filter(v => v && v.length > 2))];
   for (let i = 0; i < unicas.length; i++) {
-    const coord = await _geocodNominatim(unicas[i]);
+    const coord = await _geocodNominatim(unicas[i], zona);
     if (coord) return coord;
     if (i < unicas.length - 1) await new Promise(r => setTimeout(r, 1100));
   }
@@ -2470,7 +2490,7 @@ async function guardarServicio(id = '') {
   const necesitaGeocod = !id || direccion !== dirPrevia || !latPrevio || !lonPrevio;
   if (necesitaGeocod && direccion) {
     toast('🌍 Geolocalizando dirección...', 'info');
-    const coords = await geocodificarDireccion(direccion);
+    const coords = await geocodificarDireccion(direccion, zona);
     if (coords) {
       latFinal = coords.lat;
       lonFinal = coords.lon;
