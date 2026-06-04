@@ -135,8 +135,8 @@ h1 { font-size: 22px; margin: 0 0 4px; }
     </div>
 
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;background:var(--surface);padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px">
-      <input type="checkbox" id="cb-reproc" style="margin:0">
-      <span>Re-procesar también los servicios con coordenadas <strong>fuera de Córdoba</strong> (recomendado si ya corriste el script antes con resultados sospechosos)</span>
+      <input type="checkbox" id="cb-reproc" checked style="margin:0">
+      <span>Re-procesar también los servicios con coordenadas <strong>fuera de Córdoba</strong> (marcado por defecto — desmarcalo solo si querés procesar exclusivamente los servicios sin coordenadas)</span>
     </label>
 
     <div class="row" style="margin-bottom:14px">
@@ -387,6 +387,9 @@ function expandirAbreviaturas(dir) {
 // ════════════════════════════════════════════
 // Caja generosa: cubre Córdoba Capital, Villa Allende, Villa Carlos Paz y alrededores
 const BBOX_CORDOBA = { minLat: -32.0, maxLat: -31.0, minLon: -64.7, maxLon: -63.7 };
+// Formato Nominatim viewbox: "left,top,right,bottom" en lon,lat
+const VIEWBOX_CBA = `${BBOX_CORDOBA.minLon},${BBOX_CORDOBA.maxLat},${BBOX_CORDOBA.maxLon},${BBOX_CORDOBA.minLat}`;
+
 function estaEnCordoba(lat, lon) {
   const la = parseFloat(lat), lo = parseFloat(lon);
   return !isNaN(la) && !isNaN(lo) &&
@@ -404,20 +407,22 @@ function contextoUbicacion(zona) {
 // ════════════════════════════════════════════
 //  GEOCODIFICACIÓN (Nominatim)
 // ════════════════════════════════════════════
-// Llama a Nominatim con el contexto correcto y filtra resultados que estén dentro
-// del bounding box de Córdoba. Devuelve el primer resultado válido o null.
+// Usa viewbox+bounded=1 para forzar a Nominatim a buscar solo dentro de Córdoba,
+// y aplica un filtro adicional por bbox como doble verificación.
 async function geocodificarNominatim(query, zona) {
   if (!query || query.length < 3) return null;
   const ctx = contextoUbicacion(zona);
   const q = `${query.trim()}, ${ctx}`;
+  const url = `https://nominatim.openstreetmap.org/search?format=json` +
+              `&q=${encodeURIComponent(q)}` +
+              `&limit=5&countrycodes=ar` +
+              `&viewbox=${encodeURIComponent(VIEWBOX_CBA)}&bounded=1`;
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=ar`, {
-      headers: { 'Accept-Language': 'es' }
-    });
+    const r = await fetch(url, { headers: { 'Accept-Language': 'es' } });
     if (!r.ok) return null;
     const data = await r.json();
     if (!Array.isArray(data) || data.length === 0) return null;
-    // Tomar el primer resultado que esté dentro de Córdoba
+    // Doble verificación: el primer resultado que esté dentro del bbox
     for (const d of data) {
       if (estaEnCordoba(d.lat, d.lon)) return { lat: String(d.lat), lon: String(d.lon) };
     }
