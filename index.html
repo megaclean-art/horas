@@ -4731,6 +4731,7 @@ async function guardarCobertura(id = '') {
     toast(`✓ Cobertura creada para ${operarioNombre}`, 'ok');
   }
 
+  invalidarCache('horas_coberturas');
   cerrarModal();
   renderCoberturas();
 }
@@ -4807,6 +4808,7 @@ async function cambiarEstadoCobertura(id, nuevoEstado) {
   toast(`Cobertura ${nuevoEstado.toLowerCase()}`, 'ok');
   const idx = _coberturasCache.findIndex(c => c._id === id);
   if (idx >= 0) _coberturasCache[idx].estado = nuevoEstado;
+  invalidarCache('horas_coberturas');
   filtrarCoberturas();
 }
 
@@ -4814,6 +4816,7 @@ async function eliminarCobertura(id) {
   if (!confirm('¿Eliminar esta cobertura? No se pueden deshacer.')) return;
   await fsDelete('horas_coberturas', id);
   _coberturasCache = _coberturasCache.filter(c => c._id !== id);
+  invalidarCache('horas_coberturas');
   filtrarCoberturas();
   toast('Cobertura eliminada', 'ok');
 }
