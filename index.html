@@ -3937,6 +3937,7 @@ const MOTIVOS_COBERTURA = [
   'Lic. por enfermedad',
   'Lic. ART',
   'Lic. sin goce de sueldo',
+  'Suspensión',
   'Otro'
 ];
 
@@ -3946,6 +3947,7 @@ function motivoBadge(motivo) {
   if (m.includes('vacac'))              { cls = 'pill-blue';   icon = '🌴'; }
   else if (m.includes('art'))           { cls = 'pill-purple'; icon = '🦺'; }
   else if (m.includes('enfermedad'))    { cls = 'pill-yellow'; icon = '🏥'; }
+  else if (m.includes('suspens'))       { cls = 'pill-red';    icon = '🚫'; }
   else if (m.includes('sin goce'))      { cls = 'pill-gray';   icon = '📋'; }
   else                                  { cls = 'pill-gray';   icon = '📌'; }
   return `<span class="pill ${cls}" style="font-size:10px">${icon} ${motivo||'—'}</span>`;
@@ -5528,17 +5530,22 @@ function _calcularBancoHoras({ mes, fechaReferencia, operarios, fichadas, servic
   // Si NO fichó → calcular estimado desde días × horasContratadas y marcar como estimado
   const horasCoberturaEstimadas = {}; // { operarioId: { hs, sinFichar } }
 
+  // Matchear coberturas que SE SOLAPEN con el mes (no solo las que inician en él).
+  // Una cobertura del 18-may al 14-jun debe contar en mayo Y en junio (recortada a cada mes).
   const cobMes = coberturas.filter(c =>
     c.reemplazanteId &&
     c.estado === 'ACTIVA' &&
-    c.fechaInicio?.slice(0,7) === mes
+    c.fechaInicio && c.fechaInicio <= ultimoDiaMes &&
+    (!c.fechaFin || c.fechaFin >= primerDiaMes)
   );
 
   for (const cob of cobMes) {
     const opId = cob.reemplazanteId;
-    // Calcular horas exactas por día del período
-    const fi = new Date(cob.fechaInicio + 'T12:00:00');
-    const ff = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date();
+    // Recortar el período al mes actual para evitar sumar días de otros meses
+    const fiOriginal = new Date(cob.fechaInicio + 'T12:00:00');
+    const ffOriginal = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date();
+    const fi = new Date(Math.max(fiOriginal, new Date(primerDiaMes + 'T12:00:00')));
+    const ff = new Date(Math.min(ffOriginal, new Date(ultimoDiaMes + 'T12:00:00')));
     const diasCob2 = cob.dias || [];
     let hsEstimadas = 0;
     const srv2 = servicios.find(s => s._id === cob.servicioId);
@@ -5602,7 +5609,13 @@ function _calcularBancoHoras({ mes, fechaReferencia, operarios, fichadas, servic
     ));
     const diasLicencia = Math.max(0, Math.round((ff - fi) / (1000*60*60*24)) + 1);
     const opIdLic = cob.ausenteId;
-    if (opIdLic) enLicencia[opIdLic] = { cob, diasLicencia, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin };
+    if (opIdLic) {
+      // Solo descuentan horas: "Lic. sin goce de sueldo" y "Suspensión".
+      // Vacaciones, Enfermedad y ART: chip "en licencia" sí, descuento no.
+      const motivoLow = (cob.motivo||'').toLowerCase();
+      const descuenta = motivoLow.includes('sin goce') || motivoLow.includes('suspens');
+      enLicencia[opIdLic] = { cob, diasLicencia, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin, descuenta };
+    }
   }
 
   // Total = fijas + variables fichadas + coberturas estimadas
@@ -5614,10 +5627,11 @@ function _calcularBancoHoras({ mes, fechaReferencia, operarios, fichadas, servic
     const esReciboProporc = !!propInfo;
     const licInfo = enLicencia[o._id];
 
-    // Si está en licencia → calcular proporción de horas fijas a descontar
+    // Si está en licencia sin goce → calcular proporción de horas fijas a descontar.
+    // Vacaciones, enfermedad y ART NO descuentan (se paga el recibo igual).
     let hsFijas = horasFijasMes[o._id] || 0;
     let hsFijasDescontadas = 0;
-    if (licInfo) {
+    if (licInfo && licInfo.descuenta) {
       // Días hábiles de licencia / días hábiles del mes × horas fijas mensuales
       const diasMes = new Date(parseInt(mes.split('-')[0]), parseInt(mes.split('-')[1]), 0).getDate();
       const proporcion = Math.min(1, licInfo.diasLicencia / diasMes);
@@ -6236,13 +6250,19 @@ async function renderReporteOperario(mesOverride) {
     ));
     const diasLicencia = Math.max(0, Math.round((ff - fi) / (1000*60*60*24)) + 1);
     if (cob.ausenteId) {
-      // Si ya hay licencia previa para este operario en el mes, acumular días
+      // Solo descuentan horas: "Lic. sin goce de sueldo" y "Suspensión".
+      const motivoLow = (cob.motivo||'').toLowerCase();
+      const descuenta = motivoLow.includes('sin goce') || motivoLow.includes('suspens');
+      // Si ya hay licencia previa para este operario en el mes, acumular días.
+      // La bandera "descuenta" queda true si CUALQUIERA de las coberturas del mes
+      // es sin goce de sueldo.
       const prev = rpEnLicencia[cob.ausenteId];
       rpEnLicencia[cob.ausenteId] = {
         cob: prev?.cob || cob,
         diasLicencia: (prev?.diasLicencia || 0) + diasLicencia,
         fechaInicio: cob.fechaInicio,
-        fechaFin: cob.fechaFin
+        fechaFin: cob.fechaFin,
+        descuenta: (prev?.descuenta || descuenta)
       };
     }
   }
@@ -6318,10 +6338,11 @@ async function renderReporteOperario(mesOverride) {
       if (hsMesCompleto > 0) { hsRecibo = Math.round(hsReciboBase*(hsHasta/hsMesCompleto)*10)/10; propInfoRp = {motivo:'BAJA',fecha:o.fechaEgreso,reciboBase:hsReciboBase}; }
     }
 
-    // Aplicar descuento por licencia (mismo criterio proporcional que Banco de Horas)
+    // Aplicar descuento por licencia SOLO si es "sin goce de sueldo".
+    // Vacaciones, enfermedad y ART NO descuentan (se paga el recibo igual).
     const rpLicInfo = rpEnLicencia[o._id];
     let rpHsFijasDescontadas = 0;
-    if (rpLicInfo && hsFijas > 0) {
+    if (rpLicInfo && rpLicInfo.descuenta && hsFijas > 0) {
       const proporcion = Math.min(1, rpLicInfo.diasLicencia / rpDiasMes);
       rpHsFijasDescontadas = hsFijas * proporcion;
       hsFijas = Math.max(0, hsFijas - rpHsFijasDescontadas);
@@ -6329,11 +6350,13 @@ async function renderReporteOperario(mesOverride) {
 
     const srvs = detalleServicios; // para compatibilidad con render existente
 
-    // Coberturas donde este operario es REEMPLAZANTE en el mes
+    // Coberturas donde este operario es REEMPLAZANTE — matchear las que se solapen
+    // con el mes (no solo las que inician en él)
     const cobsReemplazante = coberturas.filter(cob =>
       cob.reemplazanteId === o._id &&
       cob.estado === 'ACTIVA' &&
-      cob.fechaInicio?.slice(0,7) === mes
+      cob.fechaInicio && cob.fechaInicio <= rpUltimoDia &&
+      (!cob.fechaFin || cob.fechaFin >= rpPrimerDia)
     );
 
     // Obtener horarios por día del servicio original si existen
@@ -6375,8 +6398,11 @@ async function renderReporteOperario(mesOverride) {
     let hsCobSinFichar = 0;
 
     for (const cob of cobsReemplazante) {
-      const fi = new Date(cob.fechaInicio + 'T12:00:00');
-      const ff = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date(hoy + 'T12:00:00');
+      // Recortar el período al rango del mes actual
+      const fiOrig = new Date(cob.fechaInicio + 'T12:00:00');
+      const ffOrig = cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date(hoy + 'T12:00:00');
+      const fi = new Date(Math.max(fiOrig, new Date(rpPrimerDia + 'T12:00:00')));
+      const ff = new Date(Math.min(ffOrig, new Date(rpUltimoDia + 'T12:00:00')));
       const diasCob = cob.dias || [];
       const hsPorDia = Number(cob.horasContratadas) || 0;
 
