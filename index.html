@@ -1588,11 +1588,13 @@ async function renderDashboard() {
     const en3dias = new Date(); en3dias.setDate(en3dias.getDate() + 3);
     const en3diasStr = en3dias.toISOString().slice(0,10);
 
+    // Toda AUSENCIA activa con fecha de fin definida puede vencer.
     const licenciasActivas = coberturas.filter(c => {
-      const motivo = (c.motivo||'').toLowerCase().trim();
       return (
         c.estado === 'ACTIVA' &&
-        (motivo.includes('enfermedad') || motivo.includes('art')) &&
+        c.ausenteId &&
+        c.tipoCob !== 'ADICIONAL' &&
+        c.motivo !== 'Facturable' &&
         c.fechaFin
       );
     });
@@ -5578,13 +5580,14 @@ function _calcularBancoHoras({ mes, fechaReferencia, operarios, fichadas, servic
   const enLicencia = {}; // { operarioId: { cob, diasLicencia } }
   const hoy = fechaReferencia;
 
+  // Toda AUSENCIA activa descuenta horas al titular, sin importar el motivo.
+  // Identificamos AUSENCIA por presencia de ausenteId (ADICIONAL/FACTURABLE usan operarioId).
   const cobsLicencia = coberturas.filter(c => {
-    const motivo = (c.motivo||'').toLowerCase().trim();
-    const opId = c.ausenteId || c.operarioId;
     return (
       c.estado === 'ACTIVA' &&
-      (motivo.includes('enfermedad') || motivo.includes('art') || (motivo.includes('lic') && motivo.includes('enf'))) &&
-      opId &&
+      c.ausenteId &&
+      c.tipoCob !== 'ADICIONAL' &&
+      c.motivo !== 'Facturable' &&
       c.fechaInicio <= hoy &&
       (!c.fechaFin || c.fechaFin >= mes + '-01')
     );
@@ -5598,7 +5601,7 @@ function _calcularBancoHoras({ mes, fechaReferencia, operarios, fichadas, servic
       new Date(hoy + 'T12:00:00')
     ));
     const diasLicencia = Math.max(0, Math.round((ff - fi) / (1000*60*60*24)) + 1);
-    const opIdLic = cob.ausenteId || cob.operarioId;
+    const opIdLic = cob.ausenteId;
     if (opIdLic) enLicencia[opIdLic] = { cob, diasLicencia, fechaInicio: cob.fechaInicio, fechaFin: cob.fechaFin };
   }
 
@@ -6210,6 +6213,41 @@ async function renderReporteOperario(mesOverride) {
   const rpPrimerDia = rpMes + '-01';
   const rpUltimoDia = rpMes + '-' + String(new Date(rpAnio, rpNumMes, 0).getDate()).padStart(2,'0');
 
+  // Toda AUSENCIA activa descuenta horas al titular proporcionalmente
+  // (mismo criterio que renderBancoHoras, calculado para este mes)
+  const rpCobsLicencia = coberturas.filter(c => (
+    c.estado === 'ACTIVA' &&
+    c.ausenteId &&
+    c.tipoCob !== 'ADICIONAL' &&
+    c.motivo !== 'Facturable' &&
+    c.fechaInicio <= hoy &&
+    (!c.fechaFin || c.fechaFin >= rpPrimerDia)
+  ));
+  const rpEnLicencia = {};
+  for (const cob of rpCobsLicencia) {
+    const fi = new Date(Math.max(
+      new Date(cob.fechaInicio + 'T12:00:00'),
+      new Date(rpPrimerDia + 'T12:00:00')
+    ));
+    const ff = new Date(Math.min(
+      cob.fechaFin ? new Date(cob.fechaFin + 'T12:00:00') : new Date(hoy + 'T12:00:00'),
+      new Date(hoy + 'T12:00:00'),
+      new Date(rpUltimoDia + 'T12:00:00')
+    ));
+    const diasLicencia = Math.max(0, Math.round((ff - fi) / (1000*60*60*24)) + 1);
+    if (cob.ausenteId) {
+      // Si ya hay licencia previa para este operario en el mes, acumular días
+      const prev = rpEnLicencia[cob.ausenteId];
+      rpEnLicencia[cob.ausenteId] = {
+        cob: prev?.cob || cob,
+        diasLicencia: (prev?.diasLicencia || 0) + diasLicencia,
+        fechaInicio: cob.fechaInicio,
+        fechaFin: cob.fechaFin
+      };
+    }
+  }
+  const rpDiasMes = new Date(rpAnio, rpNumMes, 0).getDate();
+
   window._rpOps = operarios.filter(o => o.rol === 'OPERARIO').map(o => {
     const fichadasOp = fichadasMes.filter(f=>f.operarioId===o._id);
     const hsReales = fichadasOp.reduce((s,f)=>s+(f.horasTrabajadas||0),0);
@@ -6278,6 +6316,15 @@ async function renderReporteOperario(mesOverride) {
       const hsMesCompleto = detalleServicios.reduce((s,d) => s + rpCalcHsPeriodo(d.dias, d.hpdMap, rpPrimerDia, rpUltimoDia, rpPrimerDia, rpUltimoDia), 0);
       const hsHasta = detalleServicios.reduce((s,d) => s + rpCalcHsPeriodo(d.dias, d.hpdMap, rpPrimerDia, o.fechaEgreso, rpPrimerDia, rpUltimoDia), 0);
       if (hsMesCompleto > 0) { hsRecibo = Math.round(hsReciboBase*(hsHasta/hsMesCompleto)*10)/10; propInfoRp = {motivo:'BAJA',fecha:o.fechaEgreso,reciboBase:hsReciboBase}; }
+    }
+
+    // Aplicar descuento por licencia (mismo criterio proporcional que Banco de Horas)
+    const rpLicInfo = rpEnLicencia[o._id];
+    let rpHsFijasDescontadas = 0;
+    if (rpLicInfo && hsFijas > 0) {
+      const proporcion = Math.min(1, rpLicInfo.diasLicencia / rpDiasMes);
+      rpHsFijasDescontadas = hsFijas * proporcion;
+      hsFijas = Math.max(0, hsFijas - rpHsFijasDescontadas);
     }
 
     const srvs = detalleServicios; // para compatibilidad con render existente
@@ -6370,7 +6417,8 @@ async function renderReporteOperario(mesOverride) {
       op: o, srvs: detalleServicios, hsRecibo, hsReciboBase, propInfoRp,
       hsFijas, hsVariables: hsReales,
       hsCobTotal, hsCobSinFichar, detalleCoberturas,
-      hsTotal, diff
+      hsTotal, diff,
+      licInfo: rpLicInfo, hsFijasDescontadas: rpHsFijasDescontadas
     };
   }).sort((a,b)=>a.op.nombre.localeCompare(b.op.nombre));
 
