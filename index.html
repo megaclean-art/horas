@@ -2164,6 +2164,10 @@ async function modalServicio(id = null) {
           <div class="field-sm"><label>ID Supervisor</label><input id="sv-idsup" placeholder="Ej: 007" value="${s.idSupervisor||''}"></div>
         </div>
         <div class="field-sm"><label>Nombre del cliente / objetivo</label><input id="sv-cliente" placeholder="Ej: Edificio Los Arcos" value="${s.cliente||''}"></div>
+        <div class="form-row">
+          <div class="field-sm"><label>Razón Social <span style="color:var(--text3);font-size:10px">(opcional, para certificados ART)</span></label><input id="sv-razon" placeholder="Ej: Garcia S.A." value="${s.razonSocial||''}"></div>
+          <div class="field-sm"><label>CUIT <span style="color:var(--text3);font-size:10px">(opcional)</span></label><input id="sv-cuit" placeholder="30-12345678-9" value="${s.cuit||''}"></div>
+        </div>
         <div class="field-sm"><label>Dirección <span style="color:var(--text3);font-size:10px">(solo calle + altura, se usa para geolocalizar)</span></label><input id="sv-dir" placeholder="Ej: Av. Colón 1234" value="${s.direccion||''}"></div>
         <div class="field-sm"><label>Observaciones de dirección <span style="color:var(--text3);font-size:10px">(lote, piso, oficina, referencias)</span></label><input id="sv-dir-obs" placeholder="Ej: Lote 3 · 2do piso, oficina C" value="${s.direccionObs||''}"></div>
         <div class="field-sm"><label>Supervisor (nombre)</label><input id="sv-sup" placeholder="Ej: SUPERVISION CENTRICA" value="${s.supervisor||''}"></div>
@@ -2418,6 +2422,8 @@ function toggleDia(dia) {
 
 async function guardarServicio(id = '') {
   const cliente = document.getElementById('sv-cliente').value.trim();
+  const razonSocial = document.getElementById('sv-razon')?.value.trim() || '';
+  const cuit = document.getElementById('sv-cuit')?.value.trim() || '';
   const direccion = document.getElementById('sv-dir').value.trim();
   const direccionObs = document.getElementById('sv-dir-obs')?.value.trim() || '';
   const codigo = document.getElementById('sv-codigo').value.trim();
@@ -2509,7 +2515,7 @@ async function guardarServicio(id = '') {
   }
 
   const data = {
-    cliente, direccion, direccionObs, codigo, idSupervisor, supervisor, adminCliente, zona,
+    cliente, razonSocial, cuit, direccion, direccionObs, codigo, idSupervisor, supervisor, adminCliente, zona,
     horaInicio, horaFin, horasContratadas,
     horasPorSemana: hsTotalSemana,
     radioGps,
@@ -2603,6 +2609,13 @@ async function verServicio(id) {
       <div class="modal">
         <div class="modal-title">👁 ${s.cliente||'—'}</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:14px">#${s.codigo||'—'} ${s.adminCliente?'· Admin: '+s.adminCliente:''}</div>
+
+        ${(s.razonSocial || s.cuit) ? `
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Datos fiscales</div>
+          ${s.razonSocial ? `<div style="font-size:14px;font-weight:600">🏛 ${s.razonSocial}</div>` : ''}
+          ${s.cuit ? `<div style="font-size:13px;color:var(--text2);margin-top:2px">CUIT: <strong>${s.cuit}</strong></div>` : ''}
+        </div>` : ''}
 
         <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Dirección</div>
@@ -4944,6 +4957,102 @@ async function exportarFacturables() {
 }
 
 
+// ── REPORTE NÓMINA POR SERVICIO (ART / Certificados de Cobertura) ──
+async function exportarNominaPorServicio() {
+  toast('Generando reporte de nómina...', 'info');
+  const [servicios, operarios] = await Promise.all([
+    fsList('horas_servicios'),
+    fsList('horas_usuarios')
+  ]);
+  const opById = {};
+  for (const o of operarios) opById[o._id] = o;
+
+  const hoy = isoHoy();
+  // Sólo servicios con al menos un operario activo (asignado y vigente)
+  const filas = [];
+  for (const s of servicios.sort((a,b) => (a.cliente||'').localeCompare(b.cliente||''))) {
+    let opsRaw = s.operarios;
+    if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
+    if (!Array.isArray(opsRaw)) opsRaw = [];
+    const opsNorm = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '', fechaFin: '' } : o);
+    // Operario "activo": sin fechaFin, o fechaFin futura
+    const activos = opsNorm.filter(o => !o.fechaFin || o.fechaFin >= hoy);
+    if (activos.length === 0) continue;
+
+    // Horarios por día → string resumido
+    let horarios = {};
+    try { if (s.horariosPorDia) horarios = typeof s.horariosPorDia === 'string' ? JSON.parse(s.horariosPorDia) : s.horariosPorDia; } catch {}
+    const diasStr = (s.dias||[]).map(d => {
+      const h = horarios[d] || { inicio: s.horaInicio, fin: s.horaFin };
+      return `${d} ${h.inicio||'--'}-${h.fin||'--'}`;
+    }).join(' | ');
+    const hsSemana = Number(s.horasPorSemana) || ((Number(s.horasContratadas)||0) * (s.dias?.length||0));
+    const razon = s.razonSocial || s.cliente || '';
+    const cuit = s.cuit || '';
+    const dirCompleta = (s.direccion||'') + (s.direccionObs ? ` (${s.direccionObs})` : '');
+
+    for (const o of activos) {
+      const op = opById[o.id];
+      if (!op) continue;
+      filas.push({
+        codigo: s.codigo || '',
+        cliente: s.cliente || '',
+        razon,
+        cuit,
+        direccion: dirCompleta,
+        opNombre: op.nombre || '',
+        opDni: op.dni || '',
+        opCuil: op.cuil || '',
+        diasStr,
+        hsSemana,
+        hsMes: (hsSemana * 4).toFixed(1),
+        fechaIngreso: o.fechaInicio || ''
+      });
+    }
+  }
+
+  if (filas.length === 0) return toast('No hay servicios con operarios activos', 'warn');
+
+  // Sanitiza valores para CSV (separador ;)
+  const sani = v => String(v == null ? '' : v).replace(/[;\r\n]+/g, ' ');
+
+  let csv = `NÓMINA POR SERVICIO — Para ART / Certificados de Cobertura\n`;
+  csv += `Generado: ${formatFecha(hoy)};Servicios con operarios activos: ${new Set(filas.map(f=>f.codigo+'|'+f.cliente)).size};Filas operario-servicio: ${filas.length}\n\n`;
+  csv += `Código;Cliente;Razón Social;CUIT;Dirección;Operario;DNI;CUIL;Días y Horarios;Hs/Semana;Hs/Mes (aprox);Fecha Ingreso al Servicio\n`;
+  for (const f of filas) {
+    csv += [
+      sani(f.codigo),
+      sani(f.cliente),
+      sani(f.razon),
+      sani(f.cuit),
+      sani(f.direccion),
+      sani(f.opNombre),
+      sani(f.opDni),
+      sani(f.opCuil),
+      sani(f.diasStr),
+      f.hsSemana,
+      f.hsMes,
+      sani(f.fechaIngreso)
+    ].join(';') + '\n';
+  }
+
+  // Avisar de servicios sin razón social ni CUIT cargados (sólo info)
+  const sinDatosFiscales = new Set(
+    filas.filter(f => !f.razon || !f.cuit).map(f => f.cliente)
+  );
+  if (sinDatosFiscales.size > 0) {
+    csv += `\n;⚠ Servicios sin Razón Social y/o CUIT completos: ${sinDatosFiscales.size}\n`;
+  }
+
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `Nomina_por_Servicio_MegaClean_${hoy}.csv`;
+  link.click();
+  toast(`✓ Nómina exportada: ${filas.length} filas`, 'ok');
+}
+
+
 function toggleEstadoCob(id, estadoActual) {
   const nuevo = estadoActual === 'ACTIVA' ? 'CERRADA' : 'ACTIVA';
   cambiarEstadoCobertura(id, nuevo);
@@ -5325,6 +5434,12 @@ async function renderReportes() {
         <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:#7c3aed">Ausentismo</div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px">Enfermedad · ART · Costo empresa vs ART</div>
       </div>
+      ${currentUser.rol !== 'SUPERVISOR' ? `
+      <div class="stat-card" style="cursor:pointer;border-color:rgba(26,143,203,.3);background:rgba(26,143,203,.04)" onclick="exportarNominaPorServicio()">
+        <div style="font-size:28px;margin-bottom:6px">📑</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--accent)">Nómina por Servicio</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">ART · Certificados · Razón Social y CUIT</div>
+      </div>` : ''}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">
       ${currentUser.rol !== 'SUPERVISOR' ? `
