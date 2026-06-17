@@ -4086,10 +4086,18 @@ function filtrarCoberturas() {
   const htmlOtros = otros.map(cob => {
     const esF = cob.tipoCob === 'FACTURABLE';
     const esA = cob.tipoCob === 'ADICIONAL';
-    const color = esF ? '#e07b2a' : '#27a85a';
-    const bgColor = esF ? 'rgba(224,123,42,.08)' : 'rgba(39,168,90,.08)';
-    const borderColor = esF ? 'rgba(224,123,42,.3)' : 'rgba(39,168,90,.3)';
-    const label = esF ? '💰 FACTURABLE' : '➕ ADICIONAL';
+    const esDesc = esF && cob.signo === '-';
+    let color, bgColor, borderColor, label;
+    if (esDesc) {
+      color = '#d63d4a'; bgColor = 'rgba(214,61,74,.08)'; borderColor = 'rgba(214,61,74,.3)';
+      label = '💸 DESCUENTO';
+    } else if (esF) {
+      color = '#e07b2a'; bgColor = 'rgba(224,123,42,.08)'; borderColor = 'rgba(224,123,42,.3)';
+      label = '💰 FACTURABLE';
+    } else {
+      color = '#27a85a'; bgColor = 'rgba(39,168,90,.08)'; borderColor = 'rgba(39,168,90,.3)';
+      label = '➕ ADICIONAL';
+    }
     return `<div class="card-section" style="margin-bottom:10px;border-left:3px solid ${color};background:${bgColor};border:1px solid ${borderColor}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div style="flex:1">
@@ -4098,7 +4106,7 @@ function filtrarCoberturas() {
             <span class="pill ${cob.estado==='ACTIVA'?'pill-green':'pill-gray'}">${cob.estado||'ACTIVA'}</span>
             ${cob.motivo?`<span class="pill pill-blue" style="font-size:10px">${cob.motivo}</span>`:''}
           </div>
-          <div style="font-family:var(--font-display);font-size:17px;font-weight:700">👷 ${cob.operarioNombre||'—'}</div>
+          <div style="font-family:var(--font-display);font-size:17px;font-weight:700">👷 ${cob.operarioNombre||(esDesc?'<span style="color:var(--text3);font-weight:400;font-style:italic">Sin operario específico</span>':'—')}</div>
           ${cob.clienteNombre||cob.clienteManual ? `<div style="font-size:13px;color:var(--text2);margin-top:2px">🏢 ${cob.clienteNombre||cob.clienteManual}</div>` : '<div style="font-size:12px;color:var(--text3);font-style:italic">Sin servicio específico</div>'}
           ${cob.direccionManual?`<div style="font-size:12px;color:var(--text2)">📍 ${cob.direccionManual}</div>`:''}
           <div style="font-size:12px;color:var(--text3);margin-top:2px">
@@ -4106,7 +4114,7 @@ function filtrarCoberturas() {
             ${cob.horasTotal?` · <strong>${cob.horasTotal}hs total</strong>`:''}
           </div>
           ${cob.descripcion?`<div style="font-size:12px;color:var(--text2);font-style:italic;margin-top:2px">"${cob.descripcion}"</div>`:''}
-          ${esF && currentUser.rol==='ADMIN' && cob.precio?`<div style="font-size:13px;font-weight:700;color:${color};margin-top:4px">💲 $${Number(cob.precio).toLocaleString('es-AR')}</div>`:''}
+          ${esF && currentUser.rol==='ADMIN' && cob.precio?`<div style="font-size:13px;font-weight:700;color:${color};margin-top:4px">${esDesc?'−':''}💲 $${Number(cob.precio).toLocaleString('es-AR')}</div>`:''}
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;margin-left:8px">
           <button class="btn-icon edit" onclick="${esF?'modalFacturable':'modalAdicional'}('${cob._id}')">✏️</button>
@@ -4266,16 +4274,27 @@ async function modalFacturable(id = null) {
   if (id) cob = await fsGet('horas_coberturas', id) || {};
   const esEdicion = !!id;
   const esAdmin = currentUser.rol === 'ADMIN';
+  // signo: '+' = adicional a facturar, '-' = descuento al cliente. Registros viejos sin signo = '+'.
+  const signoInicial = cob.signo === '-' ? '-' : '+';
+  const esDescIni = signoInicial === '-';
 
   const m = document.getElementById('modal-container');
   m.innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
       <div class="modal">
-        <div class="modal-title" style="color:var(--yellow)">💰 ${esEdicion?'Editar':'Nuevo'} Facturable</div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Trabajo con cargo al cliente — horas computadas al operario y facturadas</div>
+        <div id="fac-modal-title" class="modal-title" data-modo="${esEdicion?'Editar':'Nuevo'}" style="color:${esDescIni?'var(--red)':'var(--yellow)'}">${esDescIni?'💸':'💰'} ${esEdicion?'Editar':'Nuevo'} ${esDescIni?'Descuento':'Facturable'}</div>
+        <div id="fac-modal-sub" style="font-size:12px;color:var(--text3);margin-bottom:14px">${esDescIni?'Descuento al cliente — falta no cubierta o ajuste en menos':'Trabajo con cargo al cliente — horas computadas al operario y facturadas'}</div>
 
         <div class="field-sm">
-          <label>Operario</label>
+          <label>Tipo de novedad</label>
+          <div style="display:flex;gap:8px">
+            <button id="fac-signo-mas" type="button" onclick="toggleFacSigno('+')" style="flex:1;padding:9px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid ${esDescIni?'var(--border)':'var(--yellow)'};background:${esDescIni?'var(--surface2)':'var(--yellow)'};color:${esDescIni?'var(--text2)':'#fff'}">➕ Adicional</button>
+            <button id="fac-signo-menos" type="button" onclick="toggleFacSigno('-')" style="flex:1;padding:9px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid ${esDescIni?'var(--red)':'var(--border)'};background:${esDescIni?'var(--red)':'var(--surface2)'};color:${esDescIni?'#fff':'var(--text2)'}">➖ Descuento</button>
+          </div>
+        </div>
+
+        <div class="field-sm">
+          <label>Operario <span id="fac-op-opt" style="font-size:10px;color:var(--text3);font-weight:400">${esDescIni?'(opcional para descuento)':''}</span></label>
           <input id="fac-op-buscar" placeholder="🔍 Buscar..." oninput="this.nextElementSibling.querySelectorAll('option').forEach(o=>o.style.display=o.text.toLowerCase().replace(/,/g,' ').includes(this.value.toLowerCase().replace(/,/g,' '))?'':'none')"
             style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none;margin-bottom:4px">
           <select id="fac-op" size="4" style="width:100%;background:var(--bg);border:1.5px solid var(--yellow);color:var(--text);padding:6px;border-radius:8px;font-size:13px">
@@ -4302,8 +4321,8 @@ async function modalFacturable(id = null) {
         </div>
 
         <div class="field-sm">
-          <label>Descripción del trabajo</label>
-          <input id="fac-desc" placeholder="Ej: Limpieza final de obra, 3 pisos" value="${cob.descripcion||''}">
+          <label>Descripción <span id="fac-desc-hint" style="font-size:10px;color:var(--text3);font-weight:400">${esDescIni?'(motivo del descuento)':'(del trabajo)'}</span></label>
+          <input id="fac-desc" placeholder="${esDescIni?'Ej: Falta sin reemplazo el 14/06 - cliente no aceptó cobertura':'Ej: Limpieza final de obra, 3 pisos'}" value="${cob.descripcion||''}">
         </div>
 
         <div class="form-row">
@@ -4311,33 +4330,35 @@ async function modalFacturable(id = null) {
           <div class="field-sm"><label>Fecha fin</label><input id="fac-ffin" type="date" value="${cob.fechaFin||''}"></div>
         </div>
         <div class="form-row">
-          <div class="field-sm"><label>Hora inicio</label><input id="fac-hinicio" type="time" value="${cob.horaInicio||''}"></div>
-          <div class="field-sm"><label>Hora fin</label><input id="fac-hfin" type="time" value="${cob.horaFin||''}"></div>
+          <div class="field-sm"><label>Hora inicio <span id="fac-hi-opt" style="font-size:10px;color:var(--text3);font-weight:400">${esDescIni?'(opcional)':''}</span></label><input id="fac-hinicio" type="time" value="${cob.horaInicio||''}"></div>
+          <div class="field-sm"><label>Hora fin <span id="fac-hf-opt" style="font-size:10px;color:var(--text3);font-weight:400">${esDescIni?'(opcional)':''}</span></label><input id="fac-hfin" type="time" value="${cob.horaFin||''}"></div>
         </div>
         <div class="field-sm">
-          <label>Total horas</label>
+          <label>Total horas <span id="fac-hs-opt" style="font-size:10px;color:var(--text3);font-weight:400">${esDescIni?'(opcional)':''}</span></label>
           <input id="fac-hstotal" type="number" step="0.5" placeholder="Ej: 8" value="${cob.horasTotal||''}">
         </div>
 
         ${esAdmin ? `
-        <div class="field-sm" style="background:rgba(224,123,42,.06);border:1px solid rgba(224,123,42,.2);border-radius:10px;padding:12px">
-          <label style="color:var(--yellow)">💲 Precio a facturar <span style="font-size:10px;font-weight:400">(solo visible para Admin)</span></label>
+        <div id="fac-precio-box" class="field-sm" style="background:${esDescIni?'rgba(214,61,74,.06)':'rgba(224,123,42,.06)'};border:1px solid ${esDescIni?'rgba(214,61,74,.25)':'rgba(224,123,42,.2)'};border-radius:10px;padding:12px">
+          <label id="fac-precio-label" style="color:${esDescIni?'var(--red)':'var(--yellow)'}">💲 <span id="fac-precio-text">${esDescIni?'Importe a descontar (positivo, se resta en el reporte)':'Precio a facturar'}</span> <span style="font-size:10px;font-weight:400">(solo visible para Admin)</span></label>
           <input id="fac-precio" type="number" step="0.01" placeholder="Ej: 45000" value="${cob.precio||''}"
-            style="width:100%;background:#fff;border:1.5px solid rgba(224,123,42,.4);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-top:6px">
+            style="width:100%;background:#fff;border:1.5px solid ${esDescIni?'rgba(214,61,74,.4)':'rgba(224,123,42,.4)'};color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px;outline:none;margin-top:6px">
         </div>` : ''}
 
         <div class="modal-actions">
           <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
-          <button class="btn-primary" style="background:linear-gradient(135deg,#e07b2a,#c4621a)" onclick="guardarFacturable('${id||''}')">✓ GUARDAR FACTURABLE</button>
+          <button id="fac-btn-guardar" class="btn-primary" style="background:${esDescIni?'linear-gradient(135deg,#d94545,#a83333)':'linear-gradient(135deg,#e07b2a,#c4621a)'}" onclick="guardarFacturable('${id||''}')">✓ GUARDAR ${esDescIni?'DESCUENTO':'FACTURABLE'}</button>
         </div>
       </div>
     </div>`;
 
   window._facTipoCliente = cob.clienteManual ? 'manual' : 'existente';
   if (cob.clienteManual) toggleFacCliente('manual');
+  window._facSigno = signoInicial;
 }
 
 let _facTipoCliente = 'existente';
+let _facSigno = '+';
 function toggleFacCliente(tipo) {
   _facTipoCliente = tipo;
   ['existente','manual'].forEach(t => {
@@ -4352,9 +4373,77 @@ function toggleFacCliente(tipo) {
   });
 }
 
+function toggleFacSigno(signo) {
+  _facSigno = signo;
+  const esDesc = signo === '-';
+
+  // Botones de signo
+  const bMas = document.getElementById('fac-signo-mas');
+  const bMenos = document.getElementById('fac-signo-menos');
+  if (bMas) {
+    bMas.style.background = esDesc ? 'var(--surface2)' : 'var(--yellow)';
+    bMas.style.color = esDesc ? 'var(--text2)' : '#fff';
+    bMas.style.borderColor = esDesc ? 'var(--border)' : 'var(--yellow)';
+  }
+  if (bMenos) {
+    bMenos.style.background = esDesc ? 'var(--red)' : 'var(--surface2)';
+    bMenos.style.color = esDesc ? '#fff' : 'var(--text2)';
+    bMenos.style.borderColor = esDesc ? 'var(--red)' : 'var(--border)';
+  }
+
+  // Título y subtítulo
+  const titulo = document.getElementById('fac-modal-title');
+  if (titulo) {
+    const modo = titulo.dataset.modo || 'Nuevo';
+    titulo.innerHTML = `${esDesc?'💸':'💰'} ${modo} ${esDesc?'Descuento':'Facturable'}`;
+    titulo.style.color = esDesc ? 'var(--red)' : 'var(--yellow)';
+  }
+  const sub = document.getElementById('fac-modal-sub');
+  if (sub) sub.textContent = esDesc
+    ? 'Descuento al cliente — falta no cubierta o ajuste en menos'
+    : 'Trabajo con cargo al cliente — horas computadas al operario y facturadas';
+
+  // Hints "(opcional)"
+  const opt = esDesc ? '(opcional para descuento)' : '';
+  const opt2 = esDesc ? '(opcional)' : '';
+  const elOp = document.getElementById('fac-op-opt');     if (elOp) elOp.textContent = opt;
+  const elHi = document.getElementById('fac-hi-opt');     if (elHi) elHi.textContent = opt2;
+  const elHf = document.getElementById('fac-hf-opt');     if (elHf) elHf.textContent = opt2;
+  const elHs = document.getElementById('fac-hs-opt');     if (elHs) elHs.textContent = opt2;
+  const dh   = document.getElementById('fac-desc-hint');  if (dh) dh.textContent = esDesc ? '(motivo del descuento)' : '(del trabajo)';
+  const desc = document.getElementById('fac-desc');
+  if (desc) desc.placeholder = esDesc ? 'Ej: Falta sin reemplazo el 14/06 - cliente no aceptó cobertura' : 'Ej: Limpieza final de obra, 3 pisos';
+
+  // Caja de precio
+  const pbox = document.getElementById('fac-precio-box');
+  if (pbox) {
+    pbox.style.background = esDesc ? 'rgba(214,61,74,.06)' : 'rgba(224,123,42,.06)';
+    pbox.style.borderColor = esDesc ? 'rgba(214,61,74,.25)' : 'rgba(224,123,42,.2)';
+  }
+  const plbl = document.getElementById('fac-precio-label');
+  if (plbl) plbl.style.color = esDesc ? 'var(--red)' : 'var(--yellow)';
+  const ptxt = document.getElementById('fac-precio-text');
+  if (ptxt) ptxt.textContent = esDesc ? 'Importe a descontar (positivo, se resta en el reporte)' : 'Precio a facturar';
+  const pinp = document.getElementById('fac-precio');
+  if (pinp) pinp.style.borderColor = esDesc ? 'rgba(214,61,74,.4)' : 'rgba(224,123,42,.4)';
+
+  // Botón guardar
+  const bg = document.getElementById('fac-btn-guardar');
+  if (bg) {
+    bg.innerHTML = `✓ GUARDAR ${esDesc?'DESCUENTO':'FACTURABLE'}`;
+    bg.style.background = esDesc
+      ? 'linear-gradient(135deg,#d94545,#a83333)'
+      : 'linear-gradient(135deg,#e07b2a,#c4621a)';
+  }
+}
+
 async function guardarFacturable(id='') {
+  const signo = (_facSigno === '-') ? '-' : '+';
+  const esDescuento = signo === '-';
+  const etiqueta = esDescuento ? 'Descuento' : 'Facturable';
+
   const opSel = document.getElementById('fac-op');
-  const operarioId = opSel?.value;
+  const operarioId = opSel?.value || '';
   const operarioNombre = opSel?.options[opSel.selectedIndex]?.dataset.nombre || opSel?.options[opSel.selectedIndex]?.text?.split(' · ')[0] || '';
   const descripcion = document.getElementById('fac-desc')?.value.trim() || '';
   const fechaInicio = document.getElementById('fac-finicio')?.value;
@@ -4364,14 +4453,17 @@ async function guardarFacturable(id='') {
   const horasTotal = Number(document.getElementById('fac-hstotal')?.value) || 0;
   const precio = currentUser.rol==='ADMIN' ? Number(document.getElementById('fac-precio')?.value)||0 : 0;
 
-  if (!operarioId) return toast('Seleccioná un operario', 'warn');
+  // Validaciones según el signo
+  if (!esDescuento && !operarioId) return toast('Seleccioná un operario', 'warn');
   if (!fechaInicio) return toast('La fecha de inicio es obligatoria', 'warn');
+  if (esDescuento && !descripcion) return toast('Cargá el motivo del descuento', 'warn');
 
   let clienteNombre = '', clienteManual = '', servicioId = '', direccionManual = '';
   if (_facTipoCliente === 'existente') {
     const srvSel = document.getElementById('fac-srv');
     servicioId = srvSel?.value || '';
     clienteNombre = srvSel?.options[srvSel.selectedIndex]?.dataset.nombre || '';
+    if (!clienteNombre) return toast('Seleccioná el cliente / trabajo', 'warn');
   } else {
     clienteManual = document.getElementById('fac-cliente-m')?.value.trim() || '';
     direccionManual = document.getElementById('fac-dir-m')?.value.trim() || '';
@@ -4380,7 +4472,7 @@ async function guardarFacturable(id='') {
   }
 
   const data = {
-    tipoCob: 'FACTURABLE', operarioId, operarioNombre,
+    tipoCob: 'FACTURABLE', signo, operarioId, operarioNombre,
     descripcion, servicioId, clienteNombre, clienteManual, direccionManual,
     fechaInicio, fechaFin, horaInicio, horaFin, horasTotal, precio,
     estado: 'ACTIVA', creadaPor: currentUser.nombre, fechaCreacion: isoHoy()
@@ -4389,10 +4481,10 @@ async function guardarFacturable(id='') {
   if (id) {
     await fsDelete('horas_coberturas', id);
     await fsSave('horas_coberturas', id, data);
-    toast('✓ Facturable actualizado', 'ok');
+    toast(`✓ ${etiqueta} actualizado`, 'ok');
   } else {
     await fsAdd('horas_coberturas', data);
-    toast(`✓ Facturable registrado para ${operarioNombre}`, 'ok');
+    toast(esDescuento ? `✓ Descuento registrado` : `✓ Facturable registrado para ${operarioNombre}`, 'ok');
   }
   invalidarCache('horas_coberturas');
   cerrarModal();
@@ -4745,58 +4837,110 @@ async function exportarFacturables() {
   const fichadas = await fsList('horas_fichadas');
   const mes = isoHoy().slice(0,7);
 
-  // Filtrar facturables del mes actual (por fecha inicio)
-  const facturables = coberturas.filter(c => c.motivo === 'Facturable' && c.fechaInicio?.startsWith(mes));
+  // Un facturable se identifica por tipoCob === 'FACTURABLE' (modelo actual).
+  // El OR con motivo === 'Facturable' es retro-compat por si quedó algún registro
+  // viejo del flujo anterior de guardarCobertura.
+  const esFacturable = c => c.tipoCob === 'FACTURABLE' || c.motivo === 'Facturable';
+  const esDescuento = c => c.signo === '-';
 
-  if (!facturables.length) {
-    // Mostrar todos los facturables si no hay del mes
-    const todos = coberturas.filter(c => c.motivo === 'Facturable');
-    if (!todos.length) return toast('No hay coberturas facturables registradas', 'warn');
+  // Filtrar facturables del mes actual (por fecha de inicio)
+  const delMes = coberturas.filter(c => esFacturable(c) && c.fechaInicio?.startsWith(mes));
+
+  if (!delMes.length) {
+    const todos = coberturas.filter(esFacturable);
+    if (!todos.length) return toast('No hay novedades de facturación registradas', 'warn');
   }
 
-  const lista = facturables.length ? facturables : coberturas.filter(c => c.motivo === 'Facturable');
+  const lista = delMes.length ? delMes : coberturas.filter(esFacturable);
+  const adicionales = lista.filter(c => !esDescuento(c)).sort((a,b) => (a.fechaInicio||'').localeCompare(b.fechaInicio||''));
+  const descuentos  = lista.filter(esDescuento).sort((a,b) => (a.fechaInicio||'').localeCompare(b.fechaInicio||''));
 
-  let csv = `REPORTE TRABAJOS FACTURABLES;${mes}\n\n`;
-  csv += `Operario;Cliente / Trabajo;Dirección;Fecha Inicio;Fecha Fin;Días;Horario;Hs/Jornada;Precio;Estado;Observaciones\n`;
+  // Helper para calcular hs reales fichadas de una cobertura
+  const hsRealesDe = (c) => fichadas
+    .filter(f => f.operarioId === c.operarioId && f.coberturaId === c._id)
+    .reduce((s,f) => s + (f.horasTrabajadas||0), 0);
 
-  for (const c of lista.sort((a,b) => (a.fechaInicio||'').localeCompare(b.fechaInicio||''))) {
-    // Calcular horas totales fichadas
-    const fichadasCob = fichadas.filter(f =>
-      f.operarioId === c.operarioId &&
-      f.coberturaId === c._id
-    );
-    const hsTotales = fichadasCob.reduce((s,f) => s + (f.horasTrabajadas||0), 0);
+  const esAdmin = currentUser.rol === 'ADMIN';
 
-    const dir = c.direccionManual || '';
-    const precio = currentUser.rol === 'ADMIN' ? (c.precio || '') : '(restringido)';
-    csv += [
-      c.operarioNombre||'',
-      c.clienteNombre||'',
-      dir,
-      c.fechaInicio||'',
-      c.fechaFin||'indefinida',
-      (c.dias||[]).join('-'),
-      `${c.horaInicio||''}–${c.horaFin||''}`,
-      c.horasContratadas||0,
-      precio,
-      c.estado||'',
-      c.observaciones||''
-    ].join(';') + '\n';
+  let csv = `REPORTE NOVEDADES DE FACTURACIÓN;${mes}\n\n`;
+
+  // ── SECCIÓN ADICIONALES ──
+  csv += `=== ADICIONALES A FACTURAR (+) ===\n`;
+  csv += `Operario;Cliente / Trabajo;Dirección;Fecha Inicio;Fecha Fin;Horario;Hs Estimadas;Hs Reales;Precio;Estado;Descripción\n`;
+  let totalAdicHs = 0, totalAdicPrecio = 0;
+  if (adicionales.length === 0) {
+    csv += `(Sin adicionales en el período);;;;;;;;;;\n`;
+  } else {
+    for (const c of adicionales) {
+      const hsR = hsRealesDe(c);
+      const hsE = c.horasTotal || c.horasContratadas || 0;
+      const desc = (c.descripcion || c.observaciones || '').replace(/[;\r\n]+/g,' ');
+      const precio = esAdmin ? (c.precio || 0) : '(restringido)';
+      totalAdicHs += hsR;
+      totalAdicPrecio += Number(c.precio) || 0;
+      csv += [
+        c.operarioNombre || '',
+        c.clienteNombre || c.clienteManual || '',
+        c.direccionManual || '',
+        c.fechaInicio || '',
+        c.fechaFin || 'indefinida',
+        `${c.horaInicio||''}–${c.horaFin||''}`,
+        hsE,
+        hsR ? hsR.toFixed(1) : '0',
+        precio,
+        c.estado || '',
+        desc
+      ].join(';') + '\n';
+    }
   }
+  csv += `;;;;;;TOTAL ADICIONALES:;${totalAdicHs.toFixed(1)} hs;${esAdmin ? totalAdicPrecio.toLocaleString('es-AR',{minimumFractionDigits:2}) : '(restringido)'};;\n`;
 
-  // Totales
-  const totalPrecio = currentUser.rol === 'ADMIN'
-    ? lista.reduce((s,c) => s + (Number(c.precio)||0), 0)
-    : null;
   csv += `\n`;
-  if (totalPrecio !== null) csv += `;TOTAL A FACTURAR:;${totalPrecio.toLocaleString('es-AR', {minimumFractionDigits:2})}\n`;
+
+  // ── SECCIÓN DESCUENTOS ──
+  csv += `=== DESCUENTOS AL CLIENTE (-) ===\n`;
+  csv += `Operario Ausente;Cliente / Trabajo;Dirección;Fecha Inicio;Fecha Fin;Horario;Hs a Descontar;Hs Reales;Importe a Descontar;Estado;Motivo del descuento\n`;
+  let totalDescHs = 0, totalDescPrecio = 0;
+  if (descuentos.length === 0) {
+    csv += `(Sin descuentos en el período);;;;;;;;;;\n`;
+  } else {
+    for (const c of descuentos) {
+      const hsR = hsRealesDe(c);
+      const hsE = c.horasTotal || c.horasContratadas || 0;
+      const desc = (c.descripcion || c.observaciones || '').replace(/[;\r\n]+/g,' ');
+      const precio = esAdmin ? (c.precio ? `-${c.precio}` : 0) : '(restringido)';
+      totalDescHs += Number(hsE) || 0;
+      totalDescPrecio += Number(c.precio) || 0;
+      csv += [
+        c.operarioNombre || '(sin asignar)',
+        c.clienteNombre || c.clienteManual || '',
+        c.direccionManual || '',
+        c.fechaInicio || '',
+        c.fechaFin || 'indefinida',
+        `${c.horaInicio||''}–${c.horaFin||''}`,
+        hsE,
+        hsR ? hsR.toFixed(1) : '0',
+        precio,
+        c.estado || '',
+        desc
+      ].join(';') + '\n';
+    }
+  }
+  csv += `;;;;;;TOTAL DESCUENTOS:;${totalDescHs.toFixed(1)} hs;${esAdmin ? '-'+totalDescPrecio.toLocaleString('es-AR',{minimumFractionDigits:2}) : '(restringido)'};;\n`;
+
+  // ── NETO ──
+  csv += `\n`;
+  if (esAdmin) {
+    const neto = totalAdicPrecio - totalDescPrecio;
+    csv += `;;;;;;NETO A FACTURAR:;;${neto.toLocaleString('es-AR',{minimumFractionDigits:2})};;\n`;
+  }
 
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `Facturables_MegaClean_${mes}.csv`;
+  link.download = `Novedades_Facturacion_MegaClean_${mes}.csv`;
   link.click();
-  toast('✓ Reporte facturables exportado', 'ok');
+  toast('✓ Reporte de facturación exportado', 'ok');
 }
 
 
@@ -4891,7 +5035,14 @@ async function renderFeriados() {
 
 function parsearAsignaciones(raw) {
   if (!raw || !Array.isArray(raw)) return [];
-  return raw.map(a => { try { return typeof a === 'string' ? JSON.parse(a) : a; } catch { return null; } }).filter(Boolean);
+  return raw.map(a => {
+    try {
+      const obj = typeof a === 'string' ? JSON.parse(a) : a;
+      // _aid retroactivo determinístico para asignaciones legacy sin id
+      if (obj && !obj._aid) obj._aid = `legacy_${obj.operarioId||'x'}_${obj.servicioId||'x'}_${obj.horaInicio||'x'}`;
+      return obj;
+    } catch { return null; }
+  }).filter(Boolean);
 }
 
 function renderFeriadoCard(f, pasado) {
@@ -4919,7 +5070,7 @@ function renderFeriadoCard(f, pasado) {
                   <div style="font-size:11px;color:var(--text2)">🏢 ${a.clienteNombre} · ${a.horaInicio||'--:--'} – ${a.horaFin||'--:--'} · <strong>${a.horasEstimadas||0}hs</strong></div>
                   ${a.nota?`<div style="font-size:11px;color:var(--accent);margin-top:1px">💬 ${a.nota}</div>`:''}
                 </div>
-                <button class="btn-icon" onclick="eliminarAsignacionFeriado('${f._id}','${a.operarioId}')">🗑</button>
+                <button class="btn-icon" onclick="eliminarAsignacionFeriado('${f._id}','${a._aid}')">🗑</button>
               </div>`).join('')}
           <button class="btn-secondary" style="margin-top:8px;padding:7px 14px;font-size:13px" onclick="modalAsignarFeriado('${f._id}')">+ Agregar operario</button>
         </div>
@@ -4980,7 +5131,9 @@ async function modalAsignarFeriado(feriadoId) {
   const [feriado, operarios, servicios] = await Promise.all([
     fsGet('horas_feriados', feriadoId), fsList('horas_usuarios'), fsList('horas_servicios')
   ]);
-  const yaAsig = parsearAsignaciones(feriado?.asignaciones).map(a => a.operarioId);
+  const asigsPrev = parsearAsignaciones(feriado?.asignaciones);
+  const conteoPorOp = {};
+  for (const a of asigsPrev) conteoPorOp[a.operarioId] = (conteoPorOp[a.operarioId]||0) + 1;
   const ops = operarios.filter(o => o.rol === 'OPERARIO').sort((a,b) => a.nombre.localeCompare(b.nombre));
   const srvOpts = servicios.sort((a,b) => (a.cliente||'').localeCompare(b.cliente||'')).map(s =>
     `<option value="${s._id}" data-nombre="${s.cliente}" data-hi="${s.horaInicio||''}" data-hf="${s.horaFin||''}" data-hs="${s.horasContratadas||0}">${s.cliente}${s.codigo?' #'+s.codigo:''}</option>`).join('');
@@ -4998,7 +5151,7 @@ async function modalAsignarFeriado(feriadoId) {
           <input id="fasig-op-q" placeholder="🔍 Filtrar..." oninput="document.querySelectorAll('#fasig-op option').forEach(o=>o.style.display=o.text.toLowerCase().includes(this.value.toLowerCase())?'':' none')"
             style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;outline:none;margin-bottom:4px">
           <select id="fasig-op" size="5" style="width:100%;background:var(--bg);border:1.5px solid var(--border);color:var(--text);padding:4px;border-radius:8px;font-size:13px">
-            ${ops.map(o => `<option value="${o._id}" data-nombre="${o.nombre}" ${yaAsig.includes(o._id)?'disabled style="color:var(--text3)"':''}>${o.nombre}${yaAsig.includes(o._id)?' ✓':''}${o.dni?' · '+o.dni:''}</option>`).join('')}
+            ${ops.map(o => { const n = conteoPorOp[o._id]||0; return `<option value="${o._id}" data-nombre="${o.nombre}">${o.nombre}${n>0?` · ${n} ya asignado${n>1?'s':''}`:''}${o.dni?' · '+o.dni:''}</option>`; }).join('')}
           </select>
         </div>
         <div class="field-sm">
@@ -5042,23 +5195,27 @@ async function guardarAsigFeriado(feriadoId) {
 
   const feriado = await fsGet('horas_feriados', feriadoId);
   const actuales = parsearAsignaciones(feriado?.asignaciones);
-  if (actuales.find(a => a.operarioId === operarioId)) return toast('Operario ya asignado', 'warn');
+  // Permitir múltiples asignaciones por operario; bloquear solo el duplicado exacto
+  if (actuales.find(a => a.operarioId === operarioId && a.servicioId === servicioId && a.horaInicio === horaInicio)) {
+    return toast('Ya existe esta asignación (mismo operario, objetivo y horario)', 'warn');
+  }
 
-  const nueva = { operarioId, operarioNombre, servicioId, clienteNombre, horaInicio, horaFin, horasEstimadas, nota };
+  const _aid = `${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const nueva = { _aid, operarioId, operarioNombre, servicioId, clienteNombre, horaInicio, horaFin, horasEstimadas, nota };
   const nuevas = [...actuales, nueva].map(a => JSON.stringify(a));
   await fsSave('horas_feriados', feriadoId, { asignaciones: nuevas });
   toast(`✓ ${operarioNombre} asignado`, 'ok');
   cerrarModal(); renderFeriados();
 }
 
-async function eliminarAsignacionFeriado(feriadoId, operarioId) {
-  if (!confirm('¿Quitar este operario del feriado?')) return;
+async function eliminarAsignacionFeriado(feriadoId, aid) {
+  if (!confirm('¿Quitar esta asignación del feriado?')) return;
   const feriado = await fsGet('horas_feriados', feriadoId);
   const nuevas = parsearAsignaciones(feriado?.asignaciones)
-    .filter(a => a.operarioId !== operarioId)
+    .filter(a => a._aid !== aid)
     .map(a => JSON.stringify(a));
   await fsSave('horas_feriados', feriadoId, { asignaciones: nuevas });
-  toast('Operario quitado', 'ok'); renderFeriados();
+  toast('Asignación quitada', 'ok'); renderFeriados();
 }
 
 // ── RECORDATORIO para el operario en pantalla fichar ──
@@ -5067,8 +5224,8 @@ async function cargarRecordatorioFeriados() {
     const feriados = await fsList('horas_feriados');
     const hoy = feriados.find(f => f.fecha === isoHoy());
     if (!hoy) return null;
-    const miAsig = parsearAsignaciones(hoy.asignaciones).find(a => a.operarioId === currentUser._id);
-    return miAsig ? { feriado: hoy, asignacion: miAsig } : null;
+    const misAsigs = parsearAsignaciones(hoy.asignaciones).filter(a => a.operarioId === currentUser._id);
+    return misAsigs.length ? { feriado: hoy, asignaciones: misAsigs } : null;
   } catch { return null; }
 }
 
@@ -5178,8 +5335,8 @@ async function renderReportes() {
       </div>
       <div class="stat-card" style="cursor:pointer;border-color:rgba(224,123,42,.3)" onclick="exportarFacturables()">
         <div style="font-size:28px;margin-bottom:6px">💰</div>
-        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--yellow)">Facturables</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Trabajos con cargo al cliente</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--yellow)">Novedades Facturación</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Adicionales y descuentos al cliente</div>
       </div>` : ''}
     </div>
 
@@ -6964,22 +7121,28 @@ async function renderAgenda() {
   });
 
   // ── COBERTURAS ACTIVAS ──
+  // Excluimos descuentos: son novedades administrativas para facturación,
+  // no algo que el operario deba "hacer".
   const misCoberturas = coberturas.filter(c =>
     c.operarioId === currentUser._id &&
     c.estado === 'ACTIVA' &&
-    (!c.fechaFin || c.fechaFin >= hoy)
+    (!c.fechaFin || c.fechaFin >= hoy) &&
+    c.signo !== '-'
   );
 
   // ── FERIADOS PRÓXIMOS donde estoy asignado ──
+  // Un operario puede tener varias asignaciones por feriado (distintos servicios u horarios).
+  // Aplanamos: cada asignación es una tarjeta.
   const misFeriados = feriados
     .filter(f => f.fecha >= hoy)
-    .map(f => {
-      const asigs = parsearAsignaciones(f.asignaciones);
-      const miAsig = asigs.find(a => a.operarioId === currentUser._id);
-      return miAsig ? { feriado: f, asig: miAsig } : null;
+    .flatMap(f => {
+      const asigs = parsearAsignaciones(f.asignaciones).filter(a => a.operarioId === currentUser._id);
+      return asigs.map(asig => ({ feriado: f, asig }));
     })
-    .filter(Boolean)
-    .sort((a, b) => a.feriado.fecha.localeCompare(b.feriado.fecha));
+    .sort((a, b) =>
+      a.feriado.fecha.localeCompare(b.feriado.fecha) ||
+      (a.asig.horaInicio||'').localeCompare(b.asig.horaInicio||'')
+    );
 
   // Ordenar días de la semana para mostrar la agenda semanal
   const diasOrden = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM'];
