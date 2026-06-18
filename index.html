@@ -1059,25 +1059,54 @@ function distanciaMetros(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// ── BOUNDING BOX DE CÓRDOBA Y CONTEXTO POR ZONA ──
-// Filtra resultados de Nominatim que caen fuera del área metropolitana de Córdoba.
-const BBOX_CORDOBA = { minLat: -32.0, maxLat: -31.0, minLon: -64.7, maxLon: -63.7 };
-const VIEWBOX_CBA = `${BBOX_CORDOBA.minLon},${BBOX_CORDOBA.maxLat},${BBOX_CORDOBA.maxLon},${BBOX_CORDOBA.minLat}`;
-function estaEnCordoba(lat, lon) {
+// ── BOUNDING BOX DE CÓRDOBA Y CONTEXTO POR LOCALIDAD ──
+// Cada localidad tiene su propio bbox estricto y contexto para Nominatim.
+// La localidad la elige el usuario en el ABM del servicio (default: Córdoba capital).
+// La zona logística NO se usa para geocodificar — es sólo para reparto.
+const LOCALIDAD_DEFAULT = 'Córdoba';
+const LOCALIDADES_INFO = {
+  'Córdoba':            { ctx: '5000 Córdoba Capital, Argentina',          bbox: { minLat: -31.55, maxLat: -31.30, minLon: -64.40, maxLon: -64.05 } },
+  'Villa Carlos Paz':   { ctx: '5152 Villa Carlos Paz, Córdoba, Argentina', bbox: { minLat: -31.50, maxLat: -31.36, minLon: -64.62, maxLon: -64.45 } },
+  'Villa Allende':      { ctx: '5105 Villa Allende, Córdoba, Argentina',    bbox: { minLat: -31.32, maxLat: -31.27, minLon: -64.32, maxLon: -64.27 } },
+  'La Calera':          { ctx: '5151 La Calera, Córdoba, Argentina',        bbox: { minLat: -31.37, maxLat: -31.32, minLon: -64.40, maxLon: -64.30 } },
+  'Monte Cristo':       { ctx: '5125 Monte Cristo, Córdoba, Argentina',     bbox: { minLat: -31.40, maxLat: -31.32, minLon: -64.02, maxLon: -63.91 } },
+  'Jesús María':        { ctx: '5220 Jesús María, Córdoba, Argentina',      bbox: { minLat: -31.00, maxLat: -30.93, minLon: -64.13, maxLon: -64.03 } },
+  'Mendiolaza':         { ctx: '5107 Mendiolaza, Córdoba, Argentina',       bbox: { minLat: -31.30, maxLat: -31.25, minLon: -64.33, maxLon: -64.27 } },
+  'Río Ceballos':       { ctx: '5111 Río Ceballos, Córdoba, Argentina',     bbox: { minLat: -31.22, maxLat: -31.14, minLon: -64.36, maxLon: -64.28 } },
+  'Unquillo':           { ctx: '5109 Unquillo, Córdoba, Argentina',         bbox: { minLat: -31.26, maxLat: -31.21, minLon: -64.34, maxLon: -64.28 } },
+  'Saldán':             { ctx: '5187 Saldán, Córdoba, Argentina',           bbox: { minLat: -31.37, maxLat: -31.33, minLon: -64.36, maxLon: -64.28 } },
+  'Malagueño':          { ctx: '5186 Malagueño, Córdoba, Argentina',        bbox: { minLat: -31.52, maxLat: -31.43, minLon: -64.42, maxLon: -64.31 } },
+  'Alta Gracia':        { ctx: '5186 Alta Gracia, Córdoba, Argentina',      bbox: { minLat: -31.71, maxLat: -31.61, minLon: -64.46, maxLon: -64.36 } },
+  'Pilar':              { ctx: '5972 Pilar, Córdoba, Argentina',            bbox: { minLat: -31.72, maxLat: -31.65, minLon: -63.93, maxLon: -63.85 } },
+  'Malvinas Argentinas':{ ctx: '5197 Malvinas Argentinas, Córdoba, Argentina', bbox: { minLat: -31.44, maxLat: -31.37, minLon: -64.08, maxLon: -64.00 } }
+};
+// Bbox amplio para "Otra localidad" (caída): toda el área metropolitana ampliada.
+const BBOX_AMPLIO = { minLat: -32.0, maxLat: -30.8, minLon: -64.7, maxLon: -63.7 };
+
+function _localidadInfo(localidad) {
+  const l = (localidad || '').trim();
+  return LOCALIDADES_INFO[l] || null;
+}
+function _bboxParaLocalidad(localidad) {
+  return _localidadInfo(localidad)?.bbox || BBOX_AMPLIO;
+}
+function _ctxParaLocalidad(localidad) {
+  const li = _localidadInfo(localidad);
+  if (li) return li.ctx;
+  const l = (localidad || '').trim();
+  return l ? `${l}, Córdoba, Argentina` : '5000 Córdoba Capital, Argentina';
+}
+function _estaEnBbox(lat, lon, bbox) {
   const la = parseFloat(lat), lo = parseFloat(lon);
   return !isNaN(la) && !isNaN(lo) &&
-         la >= BBOX_CORDOBA.minLat && la <= BBOX_CORDOBA.maxLat &&
-         lo >= BBOX_CORDOBA.minLon && lo <= BBOX_CORDOBA.maxLon;
+         la >= bbox.minLat && la <= bbox.maxLat &&
+         lo >= bbox.minLon && lo <= bbox.maxLon;
 }
-function contextoUbicacion(zona) {
-  const z = (zona||'').trim();
-  if (z === 'Villa Allende') return '5105 Villa Allende, Córdoba, Argentina';
-  if (z === 'Carlos Paz') return '5152 Villa Carlos Paz, Córdoba, Argentina';
-  return '5000 Córdoba, Argentina';
-}
+// Compat: algunos lugares aún llaman estaEnCordoba(lat,lon) — lo dejamos apuntando al bbox amplio
+function estaEnCordoba(lat, lon) { return _estaEnBbox(lat, lon, BBOX_AMPLIO); }
 
 // ── GEOCODIFICACIÓN (Nominatim/OSM) ──
-// Limpia la dirección, agrega CP+ciudad como contexto y descarta resultados fuera del bbox.
+// Limpia la dirección, agrega localidad como contexto y descarta resultados fuera del bbox de esa localidad.
 function _limpiarDir(dir) {
   let d = (dir || '').trim();
   if (!d) return '';
@@ -1100,28 +1129,47 @@ function _expandirAbrev(dir) {
     .replace(/\bSta\.?(?=\s)/gi, 'Santa')
     .replace(/\bSto\.?(?=\s)/gi, 'Santo');
 }
-async function _geocodNominatim(query, zona) {
+// Filtro defensivo: si el display_name del resultado dice otra localidad distinta a la elegida, lo rechazamos.
+function _matchLocalidadEnResultado(displayName, localidadEsperada) {
+  if (!displayName) return false;
+  const dn = displayName.toLowerCase();
+  const le = (localidadEsperada || '').toLowerCase().trim();
+  // Catálogo de localidades conocidas (para detectar conflicto)
+  const otras = Object.keys(LOCALIDADES_INFO).map(k => k.toLowerCase()).filter(k => k !== le);
+  // Si el resultado menciona una localidad CONOCIDA distinta de la elegida → mismatch
+  for (const o of otras) {
+    if (dn.includes(o)) return false;
+  }
+  return true;
+}
+async function _geocodNominatim(query, localidad) {
   if (!query || query.length < 3) return null;
-  const ctx = contextoUbicacion(zona);
+  const ctx = _ctxParaLocalidad(localidad);
+  const bbox = _bboxParaLocalidad(localidad);
+  const viewbox = `${bbox.minLon},${bbox.maxLat},${bbox.maxLon},${bbox.minLat}`;
   const q = `${query.trim()}, ${ctx}`;
   const url = `https://nominatim.openstreetmap.org/search?format=json` +
               `&q=${encodeURIComponent(q)}` +
               `&limit=5&countrycodes=ar` +
-              `&viewbox=${encodeURIComponent(VIEWBOX_CBA)}&bounded=1`;
+              `&viewbox=${encodeURIComponent(viewbox)}&bounded=1` +
+              `&addressdetails=1`;
   try {
     const r = await fetch(url, { headers: { 'Accept-Language': 'es' } });
     if (!r.ok) return null;
     const data = await r.json();
     if (!Array.isArray(data) || data.length === 0) return null;
     for (const d of data) {
-      if (estaEnCordoba(d.lat, d.lon)) return { lat: String(d.lat), lon: String(d.lon) };
+      if (!_estaEnBbox(d.lat, d.lon, bbox)) continue;
+      // Si la localidad elegida es conocida, exigir que el display_name no mencione otra localidad conocida distinta
+      if (LOCALIDADES_INFO[localidad] && !_matchLocalidadEnResultado(d.display_name, localidad)) continue;
+      return { lat: String(d.lat), lon: String(d.lon) };
     }
     return null;
   } catch { return null; }
 }
 // Devuelve {lat, lon} o null. Prueba primero la versión limpia + expandida, después la
-// original expandida, y por último la original cruda. Descarta resultados fuera del bbox.
-async function geocodificarDireccion(direccion, zona) {
+// original expandida, y por último la original cruda. Descarta resultados fuera del bbox de la localidad.
+async function geocodificarDireccion(direccion, localidad) {
   if (!direccion || !direccion.trim()) return null;
   const recortada = _limpiarDir(direccion);
   const orig = direccion.trim();
@@ -1132,7 +1180,7 @@ async function geocodificarDireccion(direccion, zona) {
   ];
   const unicas = [...new Set(variantes.filter(v => v && v.length > 2))];
   for (let i = 0; i < unicas.length; i++) {
-    const coord = await _geocodNominatim(unicas[i], zona);
+    const coord = await _geocodNominatim(unicas[i], localidad);
     if (coord) return coord;
     if (i < unicas.length - 1) await new Promise(r => setTimeout(r, 1100));
   }
@@ -2168,7 +2216,23 @@ async function modalServicio(id = null) {
           <div class="field-sm"><label>Razón Social <span style="color:var(--text3);font-size:10px">(opcional, para certificados ART)</span></label><input id="sv-razon" placeholder="Ej: Garcia S.A." value="${s.razonSocial||''}"></div>
           <div class="field-sm"><label>CUIT <span style="color:var(--text3);font-size:10px">(opcional)</span></label><input id="sv-cuit" placeholder="30-12345678-9" value="${s.cuit||''}"></div>
         </div>
-        <div class="field-sm"><label>Dirección <span style="color:var(--text3);font-size:10px">(solo calle + altura, se usa para geolocalizar)</span></label><input id="sv-dir" placeholder="Ej: Av. Colón 1234" value="${s.direccion||''}"></div>
+        <div class="form-row">
+          <div class="field-sm">
+            <label>Localidad <span style="color:var(--text3);font-size:10px">(para ubicar en el mapa)</span></label>
+            <select id="sv-localidad" onchange="document.getElementById('sv-localidad-otra-box').style.display=this.value==='__otra__'?'block':'none'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none">
+              ${(() => {
+                const locActual = s.localidad || (s.direccion ? LOCALIDAD_DEFAULT : LOCALIDAD_DEFAULT);
+                const opts = Object.keys(LOCALIDADES_INFO).map(l => `<option value="${l}" ${locActual===l?'selected':''}>${l}${l===LOCALIDAD_DEFAULT?' (capital)':''}</option>`).join('');
+                const esOtra = s.localidad && !LOCALIDADES_INFO[s.localidad];
+                return opts + `<option value="__otra__" ${esOtra?'selected':''}>— Otra (escribir) —</option>`;
+              })()}
+            </select>
+            <div id="sv-localidad-otra-box" style="display:${(s.localidad && !LOCALIDADES_INFO[s.localidad]) ? 'block':'none'};margin-top:6px">
+              <input id="sv-localidad-otra" placeholder="Nombre de la localidad" value="${(s.localidad && !LOCALIDADES_INFO[s.localidad]) ? s.localidad : ''}" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;outline:none">
+            </div>
+          </div>
+          <div class="field-sm"><label>Dirección <span style="color:var(--text3);font-size:10px">(calle + altura)</span></label><input id="sv-dir" placeholder="Ej: Av. Colón 1234" value="${s.direccion||''}"></div>
+        </div>
         <div class="field-sm"><label>Observaciones de dirección <span style="color:var(--text3);font-size:10px">(lote, piso, oficina, referencias)</span></label><input id="sv-dir-obs" placeholder="Ej: Lote 3 · 2do piso, oficina C" value="${s.direccionObs||''}"></div>
         <div class="field-sm"><label>Supervisor (nombre)</label><input id="sv-sup" placeholder="Ej: SUPERVISION CENTRICA" value="${s.supervisor||''}"></div>
         <div class="field-sm">
@@ -2431,6 +2495,10 @@ async function guardarServicio(id = '') {
   const supervisor = document.getElementById('sv-sup').value.trim();
   const adminCliente = document.getElementById('sv-admin')?.value.trim() || '';
   const zona = document.getElementById('sv-zona')?.value || '';
+  // Localidad geográfica (independiente de la zona logística). Si elige "Otra", se usa el input libre.
+  const localidadSel = document.getElementById('sv-localidad')?.value || LOCALIDAD_DEFAULT;
+  const localidadOtra = document.getElementById('sv-localidad-otra')?.value.trim() || '';
+  const localidad = localidadSel === '__otra__' ? (localidadOtra || LOCALIDAD_DEFAULT) : localidadSel;
   const radioGps = Number(document.getElementById('sv-radio').value) || 300;
   // Guardar operarios como [{id, fechaInicio, fechaFin}] para trazabilidad + histórico
   // Primero recuperar históricos (operarios con fechaFin que ya no están chequeados)
@@ -2492,30 +2560,32 @@ async function guardarServicio(id = '') {
   const horasContratadas = diasSelServ.length > 0 ? hsTotalSemana / diasSelServ.length : 0;
 
   // ── GEOCODIFICACIÓN ──
-  // Si es servicio nuevo, o si la dirección cambió respecto al doc previo,
-  // o si nunca tuvo lat/lon → geocodificar con Nominatim. Si falla, queda vacío.
+  // Si es servicio nuevo, si la dirección cambió, si cambió la localidad, o si nunca tuvo lat/lon
+  // → geocodificar con Nominatim. Si falla, quedan vacías y se puede cargar manual o re-geocodificar.
   let latFinal = '', lonFinal = '';
   const dirPrevia = (sActual?.direccion || '').trim();
+  const locPrevia = (sActual?.localidad || LOCALIDAD_DEFAULT);
   const latPrevio = sActual?.lat || '';
   const lonPrevio = sActual?.lon || '';
-  const necesitaGeocod = !id || direccion !== dirPrevia || !latPrevio || !lonPrevio;
+  const necesitaGeocod = !id || direccion !== dirPrevia || localidad !== locPrevia || !latPrevio || !lonPrevio;
   if (necesitaGeocod && direccion) {
     toast('🌍 Geolocalizando dirección...', 'info');
-    const coords = await geocodificarDireccion(direccion, zona);
+    const coords = await geocodificarDireccion(direccion, localidad);
     if (coords) {
       latFinal = coords.lat;
       lonFinal = coords.lon;
     } else {
-      toast('⚠ No se pudo geolocalizar la dirección — el servicio quedó sin coordenadas', 'warn');
+      toast('⚠ No se pudo geolocalizar — podés cargar coordenadas manuales desde la ficha', 'warn');
     }
   } else {
-    // No cambió la dirección y ya tenía coordenadas: las preservamos
+    // No cambió nada relevante y ya tenía coordenadas: las preservamos
     latFinal = String(latPrevio);
     lonFinal = String(lonPrevio);
   }
 
   const data = {
     cliente, razonSocial, cuit, direccion, direccionObs, codigo, idSupervisor, supervisor, adminCliente, zona,
+    localidad,
     horaInicio, horaFin, horasContratadas,
     horasPorSemana: hsTotalSemana,
     radioGps,
@@ -2560,6 +2630,96 @@ function filtrarOpsModal() {
     const nombre = row.querySelector('div[style*="font-weight"]')?.textContent?.toLowerCase() || '';
     row.style.display = nombre.includes(q) ? '' : 'none';
   });
+}
+
+// Forzar reintento de geocodificación para un servicio existente,
+// usando la lógica actualizada (bbox por localidad + filtro defensivo).
+async function regeocodificarServicio(id) {
+  const s = await fsGet('horas_servicios', id);
+  if (!s) return toast('Servicio no encontrado', 'error');
+  if (!s.direccion?.trim()) return toast('El servicio no tiene dirección cargada', 'warn');
+  const loc = s.localidad || LOCALIDAD_DEFAULT;
+  toast(`🌍 Re-geocodificando en ${loc}...`, 'info');
+  const coords = await geocodificarDireccion(s.direccion, loc);
+  if (!coords) {
+    return toast('⚠ No se pudo geocodificar — probá con coordenadas manuales', 'warn');
+  }
+  await fsSave('horas_servicios', id, { lat: coords.lat, lon: coords.lon });
+  invalidarCache('horas_servicios');
+  toast('✓ Coordenadas actualizadas', 'ok');
+  cerrarModal();
+  verServicio(id);
+}
+
+// Modal para ingresar coordenadas manualmente (cuando Nominatim no acierta)
+async function modalCoordsManuales(id) {
+  const s = await fsGet('horas_servicios', id);
+  if (!s) return toast('Servicio no encontrado', 'error');
+
+  const mc = document.getElementById('modal-container');
+  mc.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-title">📍 Coordenadas manuales</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">
+          ${s.cliente||'—'} · ${s.direccion||'—'}
+        </div>
+
+        <div style="background:rgba(26,143,203,.08);border:1px solid rgba(26,143,203,.2);border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:var(--text2);line-height:1.5">
+          💡 <strong>Cómo conseguir las coordenadas:</strong><br>
+          1. Abrí <a href="https://www.google.com/maps" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Google Maps</a><br>
+          2. Buscá el lugar y hacé <strong>click derecho</strong> sobre el punto exacto<br>
+          3. Aparece arriba: "-31.4201, -64.1888" → click para copiar<br>
+          4. Pegalo abajo
+        </div>
+
+        <div class="field-sm">
+          <label>Pegar coordenadas (lat, lon)</label>
+          <input id="cm-paste" placeholder="-31.4201, -64.1888"
+            oninput="(()=>{const v=this.value.match(/(-?\\d+(?:\\.\\d+)?)[^\\d-]+(-?\\d+(?:\\.\\d+)?)/);if(v){document.getElementById('cm-lat').value=v[1];document.getElementById('cm-lon').value=v[2];}})()">
+        </div>
+
+        <div class="form-row">
+          <div class="field-sm"><label>Latitud</label><input id="cm-lat" type="number" step="0.000001" placeholder="-31.4201" value="${s.lat||''}"></div>
+          <div class="field-sm"><label>Longitud</label><input id="cm-lon" type="number" step="0.000001" placeholder="-64.1888" value="${s.lon||''}"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarCoordsManuales('${id}')">✓ GUARDAR COORDENADAS</button>
+        </div>
+      </div>
+    </div>`;
+  // Conectar el input de pegar de forma robusta (oninput inline puede tener problemas con escape)
+  const paste = document.getElementById('cm-paste');
+  if (paste) {
+    paste.addEventListener('input', function() {
+      const m = this.value.match(/(-?\d+(?:\.\d+)?)[^\d-]+(-?\d+(?:\.\d+)?)/);
+      if (m) {
+        const latI = document.getElementById('cm-lat');
+        const lonI = document.getElementById('cm-lon');
+        if (latI) latI.value = m[1];
+        if (lonI) lonI.value = m[2];
+      }
+    });
+  }
+}
+
+async function guardarCoordsManuales(id) {
+  const lat = document.getElementById('cm-lat').value.trim();
+  const lon = document.getElementById('cm-lon').value.trim();
+  if (!lat || !lon) return toast('Ingresá latitud y longitud', 'warn');
+  const laN = parseFloat(lat), loN = parseFloat(lon);
+  if (isNaN(laN) || isNaN(loN)) return toast('Las coordenadas no son válidas', 'warn');
+  // Sanity check muy laxo: que esté en Argentina aproximadamente
+  if (laN > -20 || laN < -56 || loN > -52 || loN < -74) {
+    if (!confirm('Las coordenadas están fuera de Argentina. ¿Guardar igual?')) return;
+  }
+  await fsSave('horas_servicios', id, { lat: String(laN), lon: String(loN) });
+  invalidarCache('horas_servicios');
+  toast('✓ Coordenadas guardadas', 'ok');
+  cerrarModal();
+  verServicio(id);
 }
 
 async function verServicio(id) {
@@ -2618,9 +2778,23 @@ async function verServicio(id) {
         </div>` : ''}
 
         <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Dirección</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Dirección</div>
+            <div style="font-size:11px;color:var(--text3)">${s.localidad || LOCALIDAD_DEFAULT}</div>
+          </div>
           <div style="font-size:14px;font-weight:600">📍 ${s.direccion||'—'}</div>
           ${s.direccionObs ? `<div style="font-size:12px;color:var(--text2);margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)">📝 ${s.direccionObs}</div>` : ''}
+          ${(s.lat && s.lon) ? `
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;color:var(--text3);flex-wrap:wrap">
+              <span>🛰 ${Number(s.lat).toFixed(5)}, ${Number(s.lon).toFixed(5)}</span>
+              <a href="https://www.google.com/maps?q=${s.lat},${s.lon}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-weight:600">Ver en Google Maps ↗</a>
+            </div>
+          ` : `<div style="margin-top:8px;padding:6px 8px;background:rgba(214,61,74,.08);border-left:3px solid var(--red);border-radius:4px;font-size:11px;color:var(--red)">⚠ Sin coordenadas — no aparece en el mapa</div>`}
+          ${(s.direccion && currentUser.rol === 'ADMIN') ? `
+            <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+              <button class="btn-secondary" style="font-size:11px;padding:6px 10px" onclick="regeocodificarServicio('${id}')">🌍 Re-geocodificar</button>
+              <button class="btn-secondary" style="font-size:11px;padding:6px 10px" onclick="modalCoordsManuales('${id}')">📍 Coordenadas manuales</button>
+            </div>` : ''}
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
