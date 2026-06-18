@@ -1661,14 +1661,21 @@ async function renderDashboard() {
         <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--red);margin-bottom:8px">
           ⛔ Licencias vencidas sin cerrar (${vencidas.length})
         </div>
-        ${vencidas.map(c => `
-          <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-            <div>
+        ${vencidas.map(c => {
+          const nombreEsc = (c.ausenteNombre||c.operarioNombre||'—').replace(/'/g,"\\'");
+          return `
+          <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="flex:1;min-width:160px">
               <div style="font-weight:700;font-size:13px">${c.ausenteNombre||c.operarioNombre||'—'}</div>
-              <div style="font-size:12px;color:var(--text3)">Venció el ${c.fechaFin} · ¿Regresó o se extiende?</div>
+              <div style="font-size:12px;color:var(--text3)">Venció el ${c.fechaFin} · ${c.motivo||'Licencia'}</div>
             </div>
-            <button class="btn-secondary" style="padding:5px 10px;font-size:11px" onclick="navigateTo('coberturas')">Ver</button>
-          </div>`).join('')}
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              <button class="btn-secondary" style="padding:5px 9px;font-size:11px;background:rgba(20,150,80,.12);color:#147a3a;border-color:rgba(20,150,80,.3)" onclick="cerrarLicenciaVencida('${c._id}','${nombreEsc}')">✓ Regresó</button>
+              <button class="btn-secondary" style="padding:5px 9px;font-size:11px;background:rgba(224,123,42,.12);color:#b56012;border-color:rgba(224,123,42,.3)" onclick="extenderLicenciaVencida('${c._id}','${c.fechaFin}','${nombreEsc}')">📅 Extender</button>
+              <button class="btn-secondary" style="padding:5px 9px;font-size:11px" onclick="navigateTo('coberturas')">Ver</button>
+            </div>
+          </div>`;
+        }).join('')}
       </div>`;
     }
 
@@ -2234,6 +2241,34 @@ async function modalServicio(id = null) {
           <div class="field-sm"><label>Dirección <span style="color:var(--text3);font-size:10px">(calle + altura)</span></label><input id="sv-dir" placeholder="Ej: Av. Colón 1234" value="${s.direccion||''}"></div>
         </div>
         <div class="field-sm"><label>Observaciones de dirección <span style="color:var(--text3);font-size:10px">(lote, piso, oficina, referencias)</span></label><input id="sv-dir-obs" placeholder="Ej: Lote 3 · 2do piso, oficina C" value="${s.direccionObs||''}"></div>
+
+        <!-- Coordenadas manuales (opcional) -->
+        <details style="margin-bottom:10px;background:var(--surface2);border-radius:8px;padding:8px 12px" ${(s.lat && s.lon) ? 'open' : ''}>
+          <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);user-select:none">
+            📍 Coordenadas ${(s.lat && s.lon) ? `<span style="font-weight:400;color:var(--text3)">— ${Number(s.lat).toFixed(5)}, ${Number(s.lon).toFixed(5)}</span>` : '<span style="font-weight:400;color:var(--text3)">(opcional, si Google no encuentra la dirección)</span>'}
+          </summary>
+          <div style="margin-top:10px">
+            <div style="background:rgba(26,143,203,.06);border:1px solid rgba(26,143,203,.18);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:var(--text2);line-height:1.5">
+              💡 Si <strong>dejás esto vacío</strong>, el sistema geolocaliza automáticamente con la dirección.<br>
+              Si cargás coordenadas acá, se respetan tal cual y <strong>no</strong> se sobreescriben.<br>
+              📌 Para obtener coords: Google Maps → click derecho en el punto exacto → click en "-31.42, -64.18" para copiar.
+            </div>
+            <div class="field-sm">
+              <label style="font-size:11px">Pegar coordenadas (lat, lon)</label>
+              <input id="sv-coords-paste" placeholder="-31.4201, -64.1888">
+            </div>
+            <div class="form-row">
+              <div class="field-sm"><label style="font-size:11px">Latitud</label><input id="sv-lat" type="number" step="0.000001" placeholder="-31.4201" value="${s.lat||''}"></div>
+              <div class="field-sm"><label style="font-size:11px">Longitud</label><input id="sv-lon" type="number" step="0.000001" placeholder="-64.1888" value="${s.lon||''}"></div>
+            </div>
+            ${(s.lat && s.lon) ? `
+              <div style="margin-top:6px;font-size:11px">
+                <a href="https://www.google.com/maps?q=${s.lat},${s.lon}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-weight:600">🛰 Ver actual en Google Maps ↗</a>
+                · <a href="#" onclick="event.preventDefault();document.getElementById('sv-lat').value='';document.getElementById('sv-lon').value='';document.getElementById('sv-coords-paste').value='';" style="color:var(--text3);text-decoration:none">Limpiar y geolocalizar de nuevo</a>
+              </div>
+            ` : ''}
+          </div>
+        </details>
         <div class="field-sm"><label>Supervisor (nombre)</label><input id="sv-sup" placeholder="Ej: SUPERVISION CENTRICA" value="${s.supervisor||''}"></div>
         <div class="field-sm">
           <label>Cliente / Administrador <span style="color:var(--text3);font-size:10px">(para agrupar servicios del mismo cliente)</span></label>
@@ -2312,6 +2347,20 @@ async function modalServicio(id = null) {
         </div>
       </div>
     </div>`;
+
+  // Listener para auto-parsear coords pegadas tipo "lat, lon" (formato Google Maps)
+  const pasteCoords = document.getElementById('sv-coords-paste');
+  if (pasteCoords) {
+    pasteCoords.addEventListener('input', function() {
+      const m = this.value.match(/(-?\d+(?:\.\d+)?)[^\d-]+(-?\d+(?:\.\d+)?)/);
+      if (m) {
+        const latI = document.getElementById('sv-lat');
+        const lonI = document.getElementById('sv-lon');
+        if (latI) latI.value = m[1];
+        if (lonI) lonI.value = m[2];
+      }
+    });
+  }
 }
 
 function renderFilaDia(dia, horario) {
@@ -2559,28 +2608,46 @@ async function guardarServicio(id = '') {
   // horasContratadas = promedio por jornada (para compatibilidad con cálculos existentes)
   const horasContratadas = diasSelServ.length > 0 ? hsTotalSemana / diasSelServ.length : 0;
 
-  // ── GEOCODIFICACIÓN ──
-  // Si es servicio nuevo, si la dirección cambió, si cambió la localidad, o si nunca tuvo lat/lon
-  // → geocodificar con Nominatim. Si falla, quedan vacías y se puede cargar manual o re-geocodificar.
+  // ── COORDENADAS ──
+  // 1) Si el usuario cargó lat/lon manualmente en el form, esas mandan (no se sobreescriben).
+  // 2) Si no, y la dirección cambió o nunca tuvo coords → geocodificar con Nominatim.
+  // 3) Si no, se preservan las que ya tenía.
   let latFinal = '', lonFinal = '';
+  const latManual = (document.getElementById('sv-lat')?.value || '').trim();
+  const lonManual = (document.getElementById('sv-lon')?.value || '').trim();
   const dirPrevia = (sActual?.direccion || '').trim();
   const locPrevia = (sActual?.localidad || LOCALIDAD_DEFAULT);
   const latPrevio = sActual?.lat || '';
   const lonPrevio = sActual?.lon || '';
-  const necesitaGeocod = !id || direccion !== dirPrevia || localidad !== locPrevia || !latPrevio || !lonPrevio;
-  if (necesitaGeocod && direccion) {
-    toast('🌍 Geolocalizando dirección...', 'info');
-    const coords = await geocodificarDireccion(direccion, localidad);
-    if (coords) {
-      latFinal = coords.lat;
-      lonFinal = coords.lon;
-    } else {
-      toast('⚠ No se pudo geolocalizar — podés cargar coordenadas manuales desde la ficha', 'warn');
+
+  if (latManual && lonManual) {
+    // Validar que sean números válidos
+    const laN = parseFloat(latManual), loN = parseFloat(lonManual);
+    if (isNaN(laN) || isNaN(loN)) {
+      return toast('Las coordenadas manuales no son válidas', 'warn');
     }
+    // Sanity check laxo para Argentina
+    if (laN > -20 || laN < -56 || loN > -52 || loN < -74) {
+      if (!confirm('Las coordenadas están fuera de Argentina. ¿Guardar igual?')) return;
+    }
+    latFinal = String(laN);
+    lonFinal = String(loN);
   } else {
-    // No cambió nada relevante y ya tenía coordenadas: las preservamos
-    latFinal = String(latPrevio);
-    lonFinal = String(lonPrevio);
+    const necesitaGeocod = !id || direccion !== dirPrevia || localidad !== locPrevia || !latPrevio || !lonPrevio;
+    if (necesitaGeocod && direccion) {
+      toast('🌍 Geolocalizando dirección...', 'info');
+      const coords = await geocodificarDireccion(direccion, localidad);
+      if (coords) {
+        latFinal = coords.lat;
+        lonFinal = coords.lon;
+      } else {
+        toast('⚠ No se pudo geolocalizar — cargá coordenadas manuales en el panel 📍 del formulario', 'warn');
+      }
+    } else {
+      // No cambió nada relevante y ya tenía coordenadas: las preservamos
+      latFinal = String(latPrevio);
+      lonFinal = String(lonPrevio);
+    }
   }
 
   const data = {
@@ -5307,6 +5374,63 @@ async function cambiarEstadoCobertura(id, nuevoEstado) {
   if (idx >= 0) _coberturasCache[idx].estado = nuevoEstado;
   invalidarCache('horas_coberturas');
   filtrarCoberturas();
+}
+
+// ─── Acciones rápidas desde el dashboard para licencias vencidas ───
+async function cerrarLicenciaVencida(id, nombre) {
+  if (!confirm(`¿Confirmás que ${nombre} regresó? Se va a cerrar la licencia.`)) return;
+  const ok = await fsSave('horas_coberturas', id, { estado: 'CERRADA' });
+  if (!ok) return toast('❌ No se pudo cerrar la licencia', 'error');
+  invalidarCache('horas_coberturas');
+  toast(`✓ Licencia cerrada — ${nombre} regresó`, 'ok');
+  // Recargar el dashboard para sacarla del listado
+  if (typeof renderDashboard === 'function') renderDashboard();
+}
+
+async function extenderLicenciaVencida(id, fechaFinActual, nombre) {
+  const mc = document.getElementById('modal-container');
+  // Default: una semana más a partir de hoy si la fechaFin ya pasó
+  const hoy = isoHoy();
+  const base = fechaFinActual && fechaFinActual > hoy ? fechaFinActual : hoy;
+  const sugerida = new Date(base + 'T12:00:00');
+  sugerida.setDate(sugerida.getDate() + 7);
+  const sugeridaStr = sugerida.toISOString().slice(0,10);
+
+  mc.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-title">📅 Extender licencia</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${nombre}</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Vencía el ${fechaFinActual||'—'}</div>
+
+        <div class="field-sm">
+          <label>Nueva fecha de fin</label>
+          <input id="ext-ffin" type="date" value="${sugeridaStr}" min="${hoy}">
+        </div>
+
+        <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5">
+          💡 La licencia queda <strong>ACTIVA</strong> con la nueva fecha de fin. Si después no vuelve, vas a verla otra vez en el dashboard cuando venza.
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="cerrarModal()">CANCELAR</button>
+          <button class="btn-primary" onclick="guardarExtensionLicencia('${id}','${nombre.replace(/'/g,"\\'")}')">✓ EXTENDER</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function guardarExtensionLicencia(id, nombre) {
+  const nuevaFin = document.getElementById('ext-ffin')?.value || '';
+  if (!nuevaFin) return toast('Elegí una fecha de fin', 'warn');
+  const hoy = isoHoy();
+  if (nuevaFin < hoy) return toast('La nueva fecha tiene que ser hoy o posterior', 'warn');
+  const ok = await fsSave('horas_coberturas', id, { fechaFin: nuevaFin, estado: 'ACTIVA' });
+  if (!ok) return toast('❌ No se pudo extender la licencia', 'error');
+  invalidarCache('horas_coberturas');
+  toast(`✓ Licencia de ${nombre} extendida hasta ${nuevaFin}`, 'ok');
+  cerrarModal();
+  if (typeof renderDashboard === 'function') renderDashboard();
 }
 
 async function eliminarCobertura(id) {
