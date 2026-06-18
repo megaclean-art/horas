@@ -2632,6 +2632,49 @@ function filtrarOpsModal() {
   });
 }
 
+// Toggle del panel desplegable con servicios sin coordenadas (pantalla Mapa)
+function togglePanelSinCoord() {
+  const p = document.getElementById('panel-sin-coord');
+  if (!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Geocodificar un servicio individual desde el panel "sin coordenadas" del mapa.
+// Marca la fila con ✓ verde si tuvo éxito, o ⚠ rojo si falló, sin recargar la lista.
+async function geocodSinCoord(id) {
+  const btn = document.getElementById(`psc-btn-${id}`);
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ ...'; }
+  try {
+    const s = await fsGet('horas_servicios', id);
+    if (!s) throw new Error('no encontrado');
+    if (!s.direccion?.trim()) throw new Error('sin dirección');
+    const loc = s.localidad || LOCALIDAD_DEFAULT;
+    const coords = await geocodificarDireccion(s.direccion, loc);
+    if (!coords) throw new Error('Nominatim no devolvió resultado');
+    await fsSave('horas_servicios', id, { lat: coords.lat, lon: coords.lon });
+    invalidarCache('horas_servicios');
+    // Marcar fila como resuelta (tachar y deshabilitar)
+    const row = document.getElementById(`psc-row-${id}`);
+    if (row) {
+      row.style.opacity = '0.5';
+      row.style.textDecoration = 'line-through';
+      row.querySelectorAll('button').forEach(b => b.disabled = true);
+    }
+    if (btn) btn.innerHTML = '✓ Listo';
+    // Decrementar contador
+    const span = document.getElementById('psc-restantes');
+    if (span) {
+      const n = Math.max(0, (parseInt(span.textContent) || 1) - 1);
+      span.textContent = n;
+    }
+    toast('✓ Geocodificado', 'ok');
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '⚠ Reintentar'; btn.style.background = 'rgba(214,61,74,.15)'; }
+    toast('⚠ No se pudo geocodificar — probá editar y cambiar la localidad o cargar coords manuales', 'warn');
+  }
+}
+
 // Forzar reintento de geocodificación para un servicio existente,
 // usando la lógica actualizada (bbox por localidad + filtro defensivo).
 async function regeocodificarServicio(id) {
@@ -2895,19 +2938,12 @@ async function eliminarServicio(id, nombre) {
 //  SCREEN: MAPA (ADMIN + SUPERVISOR)
 // ════════════════════════════════════════════
 // Colores por zona (10 zonas + fallback)
-const COLORES_ZONA = {
-  'Centro':            '#e07b2a',
-  'Nueva Córdoba':     '#1e88e5',
-  'General Paz':       '#43a047',
-  'Alta Córdoba':      '#8e24aa',
-  'Norte':             '#fb8c00',
-  'Oeste':             '#00897b',
-  'Sur':               '#d81b60',
-  'Inter Fábrica-Este':'#5e35b1',
-  'Villa Allende':     '#3949ab',
-  'Carlos Paz':        '#00acc1',
-  '':                  '#888'
-};
+// Color de los pines de servicio en el mapa.
+// El diccionario COLORES_ZONA anterior estaba roto (claves Title Case vs zonas en MAYÚSCULAS),
+// por eso todo salía gris. Si en el futuro querés colores por zona, se reactiva — pero
+// asegurando que las claves matcheen el formato de s.zona.
+const COLOR_PIN_SERVICIO = '#0055A4';   // Azul Francia
+const COLOR_PIN_FUERA    = '#c62828';   // Rojo: coordenadas fuera del bbox válido
 
 let _mapaLeaflet = null;
 let _mapaUserMarker = null;
@@ -2953,7 +2989,7 @@ async function renderMapa() {
 
   c.innerHTML = `
     <div class="section-title">🗺 Mapa de servicios</div>
-    <div class="section-sub">${agrupados.length} ubicaciones · ${conCoord.length} geolocalizados${fueraCba.length ? ` · <span style="color:var(--red,#c62828)">${fueraCba.length} fuera de Córdoba</span>` : ''}${sinCoord ? ` · <span style="color:var(--yellow)">${sinCoord} sin geolocalizar</span>` : ''}</div>
+    <div class="section-sub">${agrupados.length} ubicaciones · ${conCoord.length} geolocalizados${fueraCba.length ? ` · <span style="color:var(--red,#c62828)">${fueraCba.length} fuera de Córdoba</span>` : ''}${sinCoord ? ` · <a onclick="togglePanelSinCoord()" style="color:var(--yellow);cursor:pointer;text-decoration:underline;font-weight:600">${sinCoord} sin geolocalizar ▾</a>` : ''}</div>
 
     ${fueraCba.length > 0 ? `
     <div style="background:rgba(198,40,40,.08);border:1.5px solid rgba(198,40,40,.3);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px;color:var(--text2)">
@@ -2962,10 +2998,40 @@ async function renderMapa() {
     </div>` : ''}
 
     ${sinCoord > 0 ? `
-    <div style="background:rgba(224,123,42,.08);border:1.5px solid rgba(224,123,42,.3);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:var(--text2)">
-      <strong style="color:var(--yellow)">⚠ ${sinCoord} servicio${sinCoord===1?'':'s'} sin coordenadas.</strong>
-      ${currentUser.rol === 'ADMIN' ? 'Para cargarles ubicación, editá el servicio (con que tenga dirección alcanza, se geolocaliza solo al guardar) o usá el script <code>geocodificar_servicios.html</code>.' : 'Avisale al administrador para que los geolocalice.'}
+    <div style="background:rgba(224,123,42,.08);border:1.5px solid rgba(224,123,42,.3);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px;color:var(--text2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div><strong style="color:var(--yellow)">⚠ ${sinCoord} servicio${sinCoord===1?'':'s'} sin coordenadas.</strong>
+        ${currentUser.rol === 'ADMIN' ? ' Apretá "Ver lista" para corregirlos de a uno desde acá mismo.' : 'Avisale al administrador para que los geolocalice.'}</div>
+        ${currentUser.rol === 'ADMIN' ? `<button class="btn-secondary" style="font-size:12px;padding:5px 10px" onclick="togglePanelSinCoord()">📋 Ver lista</button>` : ''}
+      </div>
+    </div>
+    ${currentUser.rol === 'ADMIN' ? `
+    <div id="panel-sin-coord" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:12px;max-height:340px;overflow-y:auto">
+      <div id="panel-sin-coord-header" style="position:sticky;top:0;background:var(--surface);padding:6px 8px;margin:-8px -8px 8px -8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;display:flex;justify-content:space-between;align-items:center">
+        <span><strong style="color:var(--text2)" id="psc-restantes">${sinCoord}</strong> sin coordenadas</span>
+        <button onclick="togglePanelSinCoord()" style="background:none;border:0;color:var(--text3);font-size:18px;cursor:pointer;line-height:1">×</button>
+      </div>
+      ${(() => {
+        const sinCoordList = servicios
+          .filter(s => { const la=parseFloat(s.lat), lo=parseFloat(s.lon); return isNaN(la)||isNaN(lo)||la===0||lo===0; })
+          .sort((a,b)=>(a.cliente||'').localeCompare(b.cliente||''));
+        return sinCoordList.map(s => {
+          const hasDir = !!(s.direccion||'').trim();
+          return `
+          <div id="psc-row-${s._id}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border);font-size:12px">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.cliente||'(sin nombre)'} <span style="color:var(--text3);font-weight:400;font-size:10px">#${s.codigo||'—'}</span></div>
+              <div style="color:var(--text3);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${hasDir ? '📍 '+s.direccion : '<em style="color:var(--red)">⚠ sin dirección</em>'}${s.localidad && s.localidad!==LOCALIDAD_DEFAULT?` · ${s.localidad}`:''}</div>
+            </div>
+            <div style="display:flex;gap:4px;flex-shrink:0">
+              ${hasDir ? `<button id="psc-btn-${s._id}" class="btn-secondary" style="font-size:11px;padding:4px 8px;white-space:nowrap" onclick="geocodSinCoord('${s._id}')">🌍 Geocodificar</button>` : ''}
+              <button class="btn-secondary" style="font-size:11px;padding:4px 8px" onclick="modalServicio('${s._id}')" title="Editar">✏️</button>
+            </div>
+          </div>`;
+        }).join('');
+      })()}
     </div>` : ''}
+    ` : ''}
 
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
       <button class="btn-primary" style="flex:1;min-width:170px" onclick="mapaCentrarEnMiUbicacion()">📍 Mi ubicación</button>
@@ -3017,14 +3083,14 @@ function mapaDibujarPines(lista) {
     const la = parseFloat(s.lat), lo = parseFloat(s.lon);
     if (isNaN(la) || isNaN(lo)) continue;
     const fueraDeCba = !estaEnCordoba(la, lo);
-    const color = fueraDeCba ? '#c62828' : (COLORES_ZONA[s.zona||''] || COLORES_ZONA['']);
+    const color = fueraDeCba ? COLOR_PIN_FUERA : COLOR_PIN_SERVICIO;
     const marker = L.circleMarker([la, lo], {
-      radius: fueraDeCba ? 11 : 9,
+      radius: fueraDeCba ? 12 : 10,
       fillColor: color,
-      color: fueraDeCba ? '#ff5252' : '#fff',
-      weight: fueraDeCba ? 3 : 2,
+      color: '#fff',
+      weight: 3,
       opacity: 1,
-      fillOpacity: 0.9
+      fillOpacity: 1
     }).addTo(_mapaLeaflet);
 
     const nombresOps = (s._operariosAll||[])
@@ -3106,7 +3172,7 @@ function mapaActualizarListaCercanos(lista) {
     <div class="card-section-title">${conDist.length} servicios ordenados por cercanía</div>
     ${conDist.slice(0, 30).map(({s, dist}) => {
       const distTxt = dist < 1000 ? `${Math.round(dist)} m` : `${(dist/1000).toFixed(1)} km`;
-      const color = COLORES_ZONA[s.zona||''] || COLORES_ZONA[''];
+      const color = COLOR_PIN_SERVICIO;
       return `
         <div class="list-item" onclick="mapaCentrarEnServicio(${s.lat},${s.lon})" style="cursor:pointer">
           <div class="list-item-info">
