@@ -1293,7 +1293,7 @@ async function cargarServiciosHoy() {
     // Agregar pendientes offline como fichadas locales para mostrar estado correcto
     const pendientes = offlineGetPendientes();
     for (const p of pendientes) {
-      const existente = fichadasHoy.findIndex(f => f._id === p.id || (f.servicioId === p.data.servicioId && f.fecha === p.data.fecha));
+      const existente = fichadasHoy.findIndex(f => f._id === p.id || (f.servicioId === p.data.servicioId && f.fecha === p.data.fecha && (f.turno||'') === (p.data.turno||'') && (f.coberturaId||'') === (p.data.coberturaId||'')));
       const fichadaLocal = { ...p.data, _id: p.id, _offline: true };
       if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...fichadaLocal };
       else fichadasHoy.push(fichadaLocal);
@@ -1302,11 +1302,24 @@ async function cargarServiciosHoy() {
     // ── MODO ONLINE: cargar desde Firestore ──
     const servicios = await fsList('horas_servicios');
     const diaStr = DIAS_SEMANA[diasHoy()];
-    serviciosHoy = servicios.filter(s => {
+    const serviciosDelDia = servicios.filter(s => {
       const dias = s.dias || [];
       const operariosIds = normOps(s.operarios);
       return dias.includes(diaStr) && (operariosIds.includes(currentUser._id) || operariosIds.includes(String(currentUser._id)));
     });
+    // Expandir servicios con jornada partida (2 turnos el mismo día) en una tarjeta por turno
+    serviciosHoy = [];
+    for (const s of serviciosDelDia) {
+      let hpd = {};
+      try { if (s.horariosPorDia) hpd = typeof s.horariosPorDia === 'string' ? JSON.parse(s.horariosPorDia) : s.horariosPorDia; } catch {}
+      const hoyH = hpd[diaStr];
+      if (hoyH && (hoyH.inicio2 || hoyH.fin2)) {
+        serviciosHoy.push({ ...s, horaInicio: hoyH.inicio || s.horaInicio, horaFin: hoyH.fin || s.horaFin, horasContratadas: hoyH.hs || 0, _turno: '1', _turnoLabel: ' · Turno 1' });
+        serviciosHoy.push({ ...s, horaInicio: hoyH.inicio2, horaFin: hoyH.fin2, horasContratadas: hoyH.hs2 || 0, _turno: '2', _turnoLabel: ' · Turno 2' });
+      } else {
+        serviciosHoy.push({ ...s, horaInicio: hoyH?.inicio || s.horaInicio, horaFin: hoyH?.fin || s.horaFin, horasContratadas: (hoyH?.hs ?? s.horasContratadas), _turno: '' });
+      }
+    }
     coberturasHoy = await cargarCoberturasHoy();
     const todasFichadas = await fsList('horas_fichadas');
     fichadasHoy = todasFichadas.filter(f => f.operarioId === currentUser._id && f.fecha === isoHoy());
@@ -1327,22 +1340,29 @@ async function cargarServiciosHoy() {
   const htmlFijos = serviciosHoy.map(s => renderTarjetaServicio(s, fichadasHoy, false));
 
   // Renderizar coberturas variables
-  const htmlCoberturas = coberturasHoy.map(cob => {
-    // Construir objeto similar a servicio para reutilizar la tarjeta
-    const srvSimulado = {
+  const diaStrHoy = DIAS_SEMANA[diasHoy()];
+  const htmlCoberturas = [];
+  for (const cob of coberturasHoy) {
+    let hpd = {};
+    try { if (cob.horariosPorDia) hpd = typeof cob.horariosPorDia === 'string' ? JSON.parse(cob.horariosPorDia) : cob.horariosPorDia; } catch {}
+    const hoyH = hpd[diaStrHoy];
+    // Construir objeto(s) similar a servicio para reutilizar la tarjeta
+    const base = {
       _id: cob.servicioId,
       cliente: cob.clienteNombre,
       direccion: '',
-      horaInicio: cob.horaInicio,
-      horaFin: cob.horaFin,
-      horasContratadas: cob.horasContratadas,
       dias: cob.dias,
       _coberturaId: cob._id,
       _motivo: cob.motivo,
       _horasExtra: cob.horasExtraAutorizadas || 0
     };
-    return renderTarjetaServicio(srvSimulado, fichadasHoy, true);
-  });
+    if (hoyH && (hoyH.inicio2 || hoyH.fin2)) {
+      htmlCoberturas.push(renderTarjetaServicio({ ...base, horaInicio: hoyH.inicio || cob.horaInicio, horaFin: hoyH.fin || cob.horaFin, horasContratadas: hoyH.hs || 0, _turno: '1', _turnoLabel: ' · Turno 1' }, fichadasHoy, true));
+      htmlCoberturas.push(renderTarjetaServicio({ ...base, horaInicio: hoyH.inicio2, horaFin: hoyH.fin2, horasContratadas: hoyH.hs2 || 0, _turno: '2', _turnoLabel: ' · Turno 2' }, fichadasHoy, true));
+    } else {
+      htmlCoberturas.push(renderTarjetaServicio({ ...base, horaInicio: hoyH?.inicio || cob.horaInicio, horaFin: hoyH?.fin || cob.horaFin, horasContratadas: (hoyH?.hs ?? cob.horasContratadas), _turno: '' }, fichadasHoy, true));
+    }
+  }
 
   cont.innerHTML = [
     serviciosHoy.length > 0 ? `<div style="font-size:11px;letter-spacing:1px;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Servicios fijos</div>` : '',
@@ -1353,8 +1373,8 @@ async function cargarServiciosHoy() {
 }
 
 function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
-  const fichadaKey = esCobertura ? `${currentUser._id}_cob_${s._coberturaId}_${isoHoy()}` : `${currentUser._id}_${s._id}_${isoHoy()}`;
-  const fichada = fichadasHoy.find(f => f._fichadaKey === fichadaKey || f.servicioId === s._id && f.fecha === isoHoy() && (esCobertura ? f.coberturaId === s._coberturaId : !f.coberturaId));
+  const turno = s._turno || '';
+  const fichada = fichadasHoy.find(f => f.servicioId === s._id && f.fecha === isoHoy() && (esCobertura ? f.coberturaId === s._coberturaId : !f.coberturaId) && (f.turno||'') === turno);
   const tieneEntrada = fichada && fichada.entrada;
   const tieneSalida = fichada && fichada.salida;
   const enCurso = tieneEntrada && !tieneSalida;
@@ -1390,7 +1410,7 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
   return `<div class="servicio-card ${enCurso ? 'activo' : ''}">
     <div class="servicio-header">
       <div>
-        <div class="servicio-cliente">${s.cliente} ${cobTag}</div>
+        <div class="servicio-cliente">${s.cliente}${s._turnoLabel ? ` <span style="color:var(--accent);font-weight:700">${s._turnoLabel}</span>` : ''} ${cobTag}</div>
         ${s.direccion ? `<div class="servicio-dir">📍 ${s.direccion}</div>` : ''}
         <div class="servicio-horario">Horario: <span>${s.horaInicio||'--:--'} – ${s.horaFin||'--:--'}</span> · ${s.horasContratadas||0}hs contratadas${s._horasExtra > 0 ? ` <span style="color:var(--yellow)">+${s._horasExtra}hs extra auth.</span>` : ''}</div>
       </div>
@@ -1398,17 +1418,17 @@ function renderTarjetaServicio(s, fichadasHoy, esCobertura) {
     </div>
     ${fichadaHtml}
     <div class="servicio-actions">
-      <button class="btn-entrar" ${tieneEntrada ? 'disabled' : ''} onclick="ficharEntradaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}')">
+      <button class="btn-entrar" ${tieneEntrada ? 'disabled' : ''} onclick="ficharEntradaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}','${turno}')">
         ${tieneEntrada ? '✓ Entrada marcada' : '▶ ENTRAR'}
       </button>
-      <button class="btn-salir" ${!tieneEntrada || tieneSalida ? 'disabled' : ''} onclick="ficharSalidaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}',${s.horasContratadas||0},${s._horasExtra||0})">
+      <button class="btn-salir" ${!tieneEntrada || tieneSalida ? 'disabled' : ''} onclick="ficharSalidaV2('${s._id}','${s.cliente}','${esCobertura ? s._coberturaId : ''}',${s.horasContratadas||0},${s._horasExtra||0},'${turno}')">
         ${tieneSalida ? '✓ Salida marcada' : '■ SALIR'}
       </button>
     </div>
   </div>`;
 }
 
-async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '') {
+async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '', turno = '') {
   const pos = await getGPS();
   let gpsOk = true, distancia = 0, lat = 0, lon = 0;
   const estaOnline = navigator.onLine;
@@ -1436,15 +1456,17 @@ async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '') {
     }
   }
 
+  const turnoSuffix = turno ? `_t${turno}` : '';
   const id = coberturaId
-    ? `${currentUser._id}_cob_${coberturaId}_${isoHoy()}`
-    : `${currentUser._id}_${servicioId}_${isoHoy()}`;
+    ? `${currentUser._id}_cob_${coberturaId}${turnoSuffix}_${isoHoy()}`
+    : `${currentUser._id}_${servicioId}${turnoSuffix}_${isoHoy()}`;
 
   const data = {
     operarioId: currentUser._id,
     operarioNombre: currentUser.nombre,
     servicioId,
     coberturaId,
+    turno,
     clienteNombre,
     fecha: isoHoy(),
     entrada: horaActual(),
@@ -1483,10 +1505,11 @@ async function ficharEntradaV2(servicioId, clienteNombre, coberturaId = '') {
   await cargarServiciosHoy();
 }
 
-async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horasContratadas = 0, horasExtra = 0) {
+async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horasContratadas = 0, horasExtra = 0, turno = '') {
+  const turnoSuffix = turno ? `_t${turno}` : '';
   const id = coberturaId
-    ? `${currentUser._id}_cob_${coberturaId}_${isoHoy()}`
-    : `${currentUser._id}_${servicioId}_${isoHoy()}`;
+    ? `${currentUser._id}_cob_${coberturaId}${turnoSuffix}_${isoHoy()}`
+    : `${currentUser._id}_${servicioId}${turnoSuffix}_${isoHoy()}`;
 
   const estaOnline = navigator.onLine;
 
@@ -1518,7 +1541,7 @@ async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horas
     fichada = await fsGet('horas_fichadas', id);
   } else {
     const fichadasHoy = offlineLoadFichadasHoy();
-    fichada = fichadasHoy.find(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy()));
+    fichada = fichadasHoy.find(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy() && (f.turno||'') === turno && (f.coberturaId||'') === (coberturaId||'')));
     if (!fichada) {
       const pendientes = offlineGetPendientes();
       const pend = pendientes.find(p => p.id === id);
@@ -1579,7 +1602,7 @@ async function ficharSalidaV2(servicioId, clienteNombre, coberturaId = '', horas
       : { ...fichada, ...dataSalida };
     offlineAddPendiente({ id, data: dataCompleta, tipo: 'salida', ts: Date.now() });
     const fichadasHoy = offlineLoadFichadasHoy();
-    const existente = fichadasHoy.findIndex(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy()));
+    const existente = fichadasHoy.findIndex(f => f._id === id || (f.servicioId === servicioId && f.fecha === isoHoy() && (f.turno||'') === turno && (f.coberturaId||'') === (coberturaId||'')));
     if (existente >= 0) fichadasHoy[existente] = { ...fichadasHoy[existente], ...dataSalida, _offline: true };
     offlineSaveFichadasHoy(fichadasHoy);
     actualizarBannerOffline();
@@ -4970,6 +4993,7 @@ async function guardarAusencia() {
         servicioId: s._id, clienteNombre: s.cliente||'',
         horaInicio: s.horaInicio||'', horaFin: s.horaFin||'',
         horasContratadas: s.horasContratadas||0, dias: s.dias||[],
+        horariosPorDia: s.horariosPorDia || '',
         estado: 'ACTIVA', creadaPor: currentUser.nombre, fechaCreacion: isoHoy()
       });
       guardados++;
