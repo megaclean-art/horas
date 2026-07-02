@@ -1747,12 +1747,15 @@ async function renderDashboard() {
           ⛔ Licencias vencidas sin cerrar (${vencidas.length})
         </div>
         ${vencidas.map(c => `
-          <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+          <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
             <div>
               <div style="font-weight:700;font-size:13px">${c.ausenteNombre||c.operarioNombre||'—'}</div>
               <div style="font-size:12px;color:var(--text3)">Venció el ${c.fechaFin} · ¿Regresó o se extiende?</div>
             </div>
-            <button class="btn-secondary" style="padding:5px 10px;font-size:11px" onclick="navigateTo('coberturas')">Ver</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn-secondary" style="padding:5px 10px;font-size:11px;white-space:nowrap" onclick="modalResolverLicencia('${c._id}')">📅 Extender</button>
+              <button class="btn-secondary" style="padding:5px 10px;font-size:11px;white-space:nowrap;background:var(--green);color:#fff;border-color:var(--green)" onclick="finalizarLicencia('${c._id}')">✓ Regresó</button>
+            </div>
           </div>`).join('')}
       </div>`;
     }
@@ -1843,6 +1846,82 @@ async function recargarDashboard() {
           </div>`).join('')}
     </div>
     <button class="btn-secondary" style="margin-top:8px;padding:8px 16px;font-size:13px" onclick="recargarDashboard()">🔄 Actualizar datos</button>`;
+}
+
+// ── Resolución de licencias vencidas: extender o finalizar ──
+// Una "licencia" puede estar repartida en varias coberturas (una por servicio cubierto),
+// todas comparten ausenteId + fechaInicio + motivo. Las acciones aplican a todo el grupo.
+function _grupoLicencia(coberturas, base) {
+  return coberturas.filter(c =>
+    c.estado === 'ACTIVA' &&
+    (c.ausenteId||'') === (base.ausenteId||'') &&
+    (c.fechaInicio||'') === (base.fechaInicio||'') &&
+    (c.motivo||'') === (base.motivo||'')
+  );
+}
+
+async function modalResolverLicencia(coberturaId) {
+  const coberturas = await fsList('horas_coberturas');
+  const base = coberturas.find(c => c._id === coberturaId);
+  if (!base) return toast('No se encontró el registro', 'warn');
+  const grupo = _grupoLicencia(coberturas, base);
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">Licencia vencida</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:2px">👤 ${base.ausenteNombre||base.operarioNombre||'—'}</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:2px">${base.motivo||''} · desde ${base.fechaInicio||'—'}</div>
+        <div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:4px">Venció el ${base.fechaFin||'—'}</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:16px">Cubre ${grupo.length} servicio${grupo.length!==1?'s':''}. La acción se aplica a todos.</div>
+
+        <div class="field-sm">
+          <label>Nueva fecha de fin</label>
+          <input id="res-lic-ffin" type="date" value="${base.fechaFin||''}">
+        </div>
+
+        <div class="modal-actions" style="flex-direction:column;gap:8px;align-items:stretch">
+          <button class="btn-primary" style="width:100%" onclick="extenderLicencia('${coberturaId}')">📅 EXTENDER HASTA ESTA FECHA</button>
+          <button class="btn-secondary" style="width:100%;background:var(--green);color:#fff;border-color:var(--green)" onclick="finalizarLicencia('${coberturaId}')">✓ REGRESÓ — FINALIZAR AHORA</button>
+          <button class="btn-secondary" style="width:100%" onclick="cerrarModal()">CANCELAR</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function extenderLicencia(coberturaId) {
+  const nuevaFecha = document.getElementById('res-lic-ffin')?.value;
+  if (!nuevaFecha) return toast('Elegí la nueva fecha de fin', 'warn');
+
+  const coberturas = await fsList('horas_coberturas');
+  const base = coberturas.find(c => c._id === coberturaId);
+  if (!base) return toast('No se encontró el registro', 'warn');
+  const grupo = _grupoLicencia(coberturas, base);
+
+  for (const c of grupo) {
+    await fsSave('horas_coberturas', c._id, { fechaFin: nuevaFecha });
+  }
+  invalidarCache('horas_coberturas');
+  cerrarModal();
+  toast(`✓ Licencia extendida hasta ${nuevaFecha}`, 'ok');
+  renderDashboard();
+}
+
+async function finalizarLicencia(coberturaId) {
+  const coberturas = await fsList('horas_coberturas');
+  const base = coberturas.find(c => c._id === coberturaId);
+  if (!base) return toast('No se encontró el registro', 'warn');
+  if (!confirm(`¿Confirmás que ${base.ausenteNombre||base.operarioNombre||'el operario'} regresó y la licencia finaliza?`)) return;
+
+  const grupo = _grupoLicencia(coberturas, base);
+  for (const c of grupo) {
+    await fsSave('horas_coberturas', c._id, { estado: 'CERRADA' });
+  }
+  invalidarCache('horas_coberturas');
+  cerrarModal();
+  toast('✓ Licencia finalizada', 'ok');
+  renderDashboard();
 }
 
 
