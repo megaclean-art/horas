@@ -1303,6 +1303,7 @@ async function cargarServiciosHoy() {
     const servicios = await fsList('horas_servicios');
     const diaStr = DIAS_SEMANA[diasHoy()];
     const serviciosDelDia = servicios.filter(s => {
+      if (s.activo === false) return false;
       const dias = s.dias || [];
       const operariosIds = normOps(s.operarios);
       return dias.includes(diaStr) && (operariosIds.includes(currentUser._id) || operariosIds.includes(String(currentUser._id)));
@@ -2261,53 +2262,52 @@ function filtrarServicios() {
     return ops.includes(filtroOp);
   });
 
-  // ── AGRUPAR por código + horario ──
-  // Clave de agrupación: codigo|horaInicio|horaFin|dias_ordenados
-  const grupos = {};
-  for (const s of lista) {
-    const diasKey = (s.dias||[]).slice().sort().join('-');
-    const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
-    if (!grupos[clave]) {
-      grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...normOps(s.operarios)] };
-    } else {
-      // Agregar operarios del duplicado al grupo
-      const opsNuevos = normOps(s.operarios);
-      for (const op of opsNuevos) {
-        if (!grupos[clave]._operariosAll.includes(op)) grupos[clave]._operariosAll.push(op);
+  // Separar activos de dados de baja — nunca se mezclan en la misma lista
+  const listaActivos = lista.filter(s => s.activo !== false);
+  const listaBaja = lista.filter(s => s.activo === false);
+
+  function agrupar(items) {
+    const grupos = {};
+    for (const s of items) {
+      const diasKey = (s.dias||[]).slice().sort().join('-');
+      const clave = `${s.codigo||s.cliente}|${s.horaInicio||''}|${s.horaFin||''}|${diasKey}`;
+      if (!grupos[clave]) {
+        grupos[clave] = { ...s, _ids: [s._id], _operariosAll: [...normOps(s.operarios)] };
+      } else {
+        const opsNuevos = normOps(s.operarios);
+        for (const op of opsNuevos) {
+          if (!grupos[clave]._operariosAll.includes(op)) grupos[clave]._operariosAll.push(op);
+        }
+        grupos[clave]._ids.push(s._id);
       }
-      grupos[clave]._ids.push(s._id);
     }
+    return Object.values(grupos);
   }
 
-  const listaAgrupada = Object.values(grupos);
+  const listaAgrupada = agrupar(listaActivos);
+  const listaBajaAgrupada = agrupar(listaBaja);
 
   const cont = document.getElementById('srv-lista');
   if (!cont) return;
 
-  if (listaAgrupada.length === 0) {
-    cont.innerHTML = `<div class="card-section"><div style="color:var(--text3);text-align:center;padding:20px">Sin resultados</div></div>`;
-    return;
-  }
-
-  cont.innerHTML = `<div class="card-section">
-    <div class="card-section-title">Mostrando ${listaAgrupada.length} servicios (${lista.length} registros)</div>
-    ${listaAgrupada.map(s => {
-      const ops = s._operariosAll
-        .map(id => _operariosCache.find(o => o._id === id)?.nombre || id)
-        .filter(Boolean);
-      const supLabel = s.supervisor || (s.idSupervisor ? `Sup. ${s.idSupervisor}` : '');
-      // Para editar/eliminar usamos el primer ID del grupo
-      const primerIdStr = s._ids[0];
-      // Si el grupo tiene múltiples IDs, mostrar badge
-      const multiTag = s._ids.length > 1 ? `<span style="background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px">${s._ids.length} registros</span>` : '';
-      return `<div class="list-item">
+  function renderTarjeta(s, esBaja) {
+    const ops = s._operariosAll
+      .map(id => _operariosCache.find(o => o._id === id)?.nombre || id)
+      .filter(Boolean);
+    const supLabel = s.supervisor || (s.idSupervisor ? `Sup. ${s.idSupervisor}` : '');
+    const primerIdStr = s._ids[0];
+    const multiTag = s._ids.length > 1 ? `<span style="background:var(--accent-light);color:var(--accent);font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px">${s._ids.length} registros</span>` : '';
+    return `<div class="list-item" style="${esBaja ? 'opacity:.6' : ''}">
         <div class="list-item-info" style="padding-right:8px">
-          <div class="list-item-name">${s.cliente || '—'} ${s.codigo ? `<span style="color:var(--text3);font-size:11px;font-weight:400">#${s.codigo}</span>` : ''}${multiTag}</div>
+          <div class="list-item-name">${s.cliente || '—'} ${s.codigo ? `<span style="color:var(--text3);font-size:11px;font-weight:400">#${s.codigo}</span>` : ''}${multiTag}
+            ${esBaja ? `<span style="background:var(--red-light,#fde2e2);color:var(--red,#d33);font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px">DADO DE BAJA · ${s.fechaBaja||'—'}</span>` : ''}
+          </div>
           <div class="list-item-sub">📍 ${s.direccion || '<em style="color:var(--text3)">Sin dirección</em>'}</div>
           <div class="list-item-sub">
             ${(s.dias||[]).join(' · ')} &nbsp;·&nbsp; ${s.horaInicio||'--:--'} – ${s.horaFin||'--:--'} &nbsp;·&nbsp; <strong>${((Number(s.horasPorSemana)||((Number(s.horasContratadas)||0)*(s.dias?.length||0)))*4).toFixed(0)}hs/mes</strong>
             ${supLabel ? `&nbsp;·&nbsp; <span style="color:var(--text3)">🏷 ${supLabel}</span>` : ''}
           </div>
+          ${esBaja && s.motivoBaja ? `<div class="list-item-sub" style="font-style:italic">Motivo: ${s.motivoBaja}</div>` : ''}
           <div style="margin-top:4px">
             ${ops.length === 0
               ? `<em style="font-size:12px;color:var(--text3)">Sin asignar</em>`
@@ -2317,13 +2317,34 @@ function filtrarServicios() {
         </div>
         <div class="list-item-actions" style="flex-shrink:0">
           <button class="btn-icon" title="Ver detalle" onclick="verServicio('${primerIdStr}')">👁</button>
-          ${currentUser.rol === 'ADMIN' ? `
-          <button class="btn-icon edit" title="Editar" onclick="modalServicio('${primerIdStr}')">✏️</button>
-          <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>` : ''}
+          ${currentUser.rol === 'ADMIN' ? (esBaja
+            ? `<button class="btn-icon" title="Reactivar" onclick="reactivarServicio('${primerIdStr}')">↩️</button>`
+            : `<button class="btn-icon edit" title="Editar" onclick="modalServicio('${primerIdStr}')">✏️</button>
+               <button class="btn-icon" title="Dar de baja" onclick="modalDarDeBaja('${primerIdStr}','${(s.cliente||'').replace(/'/g,"\\'")}')">🔻</button>
+               <button class="btn-icon" title="Eliminar" onclick="eliminarServicioGrupo(${JSON.stringify(s._ids).replace(/"/g,"'")}, '${(s.cliente||'').replace(/'/g,'')}')">🗑</button>`
+          ) : ''}
         </div>
       </div>`;
-    }).join('')}
-  </div>`;
+  }
+
+  if (listaAgrupada.length === 0 && listaBajaAgrupada.length === 0) {
+    cont.innerHTML = `<div class="card-section"><div style="color:var(--text3);text-align:center;padding:20px">Sin resultados</div></div>`;
+    return;
+  }
+
+  cont.innerHTML = `<div class="card-section">
+    <div class="card-section-title">Mostrando ${listaAgrupada.length} servicios activos (${listaActivos.length} registros)</div>
+    ${listaAgrupada.length === 0
+      ? `<div style="color:var(--text3);text-align:center;padding:16px;font-size:13px">Sin servicios activos con este filtro</div>`
+      : listaAgrupada.map(s => renderTarjeta(s, false)).join('')}
+  </div>
+  ${listaBajaAgrupada.length > 0 ? `
+  <details class="card-section" style="margin-top:10px">
+    <summary style="cursor:pointer;font-weight:700;color:var(--text3);font-size:13px;padding:4px 0">🔻 Dados de baja (${listaBajaAgrupada.length})</summary>
+    <div style="margin-top:10px">
+      ${listaBajaAgrupada.map(s => renderTarjeta(s, true)).join('')}
+    </div>
+  </details>` : ''}`;
 }
 
 // ── MODAL UNIFICADO ALTA / EDICIÓN ──
@@ -3096,6 +3117,100 @@ async function eliminarServicio(id, nombre) {
   _serviciosCache = _serviciosCache.filter(s => s._id !== id);
   filtrarServicios();
   toast(`${nombre} eliminado`, 'ok');
+}
+
+// ── DAR DE BAJA UN SERVICIO ──
+// A diferencia de "Eliminar" (borra el registro), esto conserva el servicio como histórico
+// (activo:false) y cierra la asignación de los operarios vigentes a esa fecha, para que
+// el cálculo de banco de horas les impute el proporcional trabajado y no siga sumando horas
+// después de la baja.
+async function modalDarDeBaja(servicioId, clienteNombre) {
+  const s = await fsGet('horas_servicios', servicioId);
+  if (!s) return toast('No se encontró el servicio', 'warn');
+
+  let opsRaw = s.operarios;
+  if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
+  if (!Array.isArray(opsRaw)) opsRaw = [];
+  const opsNorm = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '', fechaFin: '' } : o);
+  const hoy = isoHoy();
+  const activos = opsNorm.filter(o => !o.fechaFin || o.fechaFin >= hoy);
+  const operariosDb = await fsList('horas_usuarios');
+  const nombresActivos = activos.map(o => operariosDb.find(op => op._id === o.id)?.nombre || o.id);
+
+  const m = document.getElementById('modal-container');
+  m.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <div class="modal-title">Dar de baja servicio</div>
+        <div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin-bottom:10px">🏢 ${clienteNombre}</div>
+
+        <div style="font-size:12px;color:var(--text3);margin-bottom:16px">
+          ${nombresActivos.length === 0
+            ? 'No tiene operarios activos asignados actualmente.'
+            : `Operario${nombresActivos.length!==1?'s':''} afectado${nombresActivos.length!==1?'s':''}: <strong>${nombresActivos.join(', ')}</strong>. Se le${nombresActivos.length!==1?'s':''} va a calcular el proporcional trabajado hasta la fecha de baja y dejará${nombresActivos.length!==1?'n':''} de sumar horas de este servicio desde entonces.`}
+        </div>
+
+        <div class="field-sm">
+          <label>Fecha de baja</label>
+          <input id="baja-srv-fecha" type="date" value="${hoy}">
+        </div>
+        <div class="field-sm">
+          <label>Motivo (opcional)</label>
+          <input id="baja-srv-motivo" type="text" placeholder="Ej: cliente dio de baja el contrato">
+        </div>
+
+        <div style="background:var(--red-light,#fde2e2);color:var(--red,#a33);border-radius:8px;padding:10px 12px;font-size:12px;margin:14px 0">
+          ⚠ El servicio va a dejar de figurar en fichaje y en los reportes/exportaciones a partir de esta acción. Va a quedar visible en la sección "Dados de baja" con el histórico.
+        </div>
+
+        <div class="modal-actions" style="flex-direction:column;gap:8px;align-items:stretch">
+          <button class="btn-primary" style="width:100%;background:var(--red,#c0392b);border-color:var(--red,#c0392b)" onclick="confirmarBajaServicio('${servicioId}','${clienteNombre.replace(/'/g,"\\'")}')">🔻 CONFIRMAR BAJA</button>
+          <button class="btn-secondary" style="width:100%" onclick="cerrarModal()">CANCELAR</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function confirmarBajaServicio(servicioId, clienteNombre) {
+  const fechaBaja = document.getElementById('baja-srv-fecha')?.value;
+  const motivoBaja = document.getElementById('baja-srv-motivo')?.value || '';
+  if (!fechaBaja) return toast('Elegí la fecha de baja', 'warn');
+
+  const s = await fsGet('horas_servicios', servicioId);
+  if (!s) return toast('No se encontró el servicio', 'warn');
+
+  let opsRaw = s.operarios;
+  if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
+  if (!Array.isArray(opsRaw)) opsRaw = [];
+  const opsNorm = opsRaw.map(o => typeof o === 'string' ? { id: o, fechaInicio: '', fechaFin: '' } : o);
+
+  // Cerrar la asignación de los operarios vigentes en la fecha de baja
+  const opsActualizados = opsNorm.map(o => {
+    if (!o.fechaFin || o.fechaFin >= fechaBaja) {
+      return { ...o, fechaFin: fechaBaja };
+    }
+    return o;
+  });
+
+  await fsSave('horas_servicios', servicioId, {
+    operarios: opsActualizados,
+    activo: false,
+    fechaBaja,
+    motivoBaja
+  });
+
+  invalidarCache('horas_servicios');
+  cerrarModal();
+  toast(`✓ ${clienteNombre} dado de baja desde ${fechaBaja}`, 'ok');
+  renderServicios();
+}
+
+async function reactivarServicio(servicioId) {
+  if (!confirm('¿Reactivar este servicio? Vas a tener que volver a asignarle operario/s manualmente si corresponde.')) return;
+  await fsSave('horas_servicios', servicioId, { activo: true, fechaBaja: '', motivoBaja: '' });
+  invalidarCache('horas_servicios');
+  toast('✓ Servicio reactivado', 'ok');
+  renderServicios();
 }
 
 // ════════════════════════════════════════════
@@ -5375,7 +5490,7 @@ async function exportarNominaPorServicio() {
   const hoy = isoHoy();
   // Sólo servicios con al menos un operario activo (asignado y vigente)
   const filas = [];
-  for (const s of servicios.sort((a,b) => (a.cliente||'').localeCompare(b.cliente||''))) {
+  for (const s of servicios.filter(s => s.activo !== false).sort((a,b) => (a.cliente||'').localeCompare(b.cliente||''))) {
     let opsRaw = s.operarios;
     if (typeof opsRaw === 'string') { try { opsRaw = JSON.parse(opsRaw); } catch { opsRaw = []; } }
     if (!Array.isArray(opsRaw)) opsRaw = [];
@@ -7437,7 +7552,8 @@ async function renderReporteServicios() {
   const c = document.getElementById('main-content');
   c.innerHTML = `<div class="section-title">Por Servicio</div><div style="text-align:center;padding:30px;color:var(--text3)">Cargando...</div>`;
 
-  const [servicios, operarios] = await Promise.all([fsList('horas_servicios'), fsList('horas_usuarios')]);
+  const [serviciosTodos, operarios] = await Promise.all([fsList('horas_servicios'), fsList('horas_usuarios')]);
+  const servicios = serviciosTodos.filter(s => s.activo !== false);
 
   const supervisores = [...new Set(servicios.map(s=>s.supervisor||s.idSupervisor).filter(Boolean))].sort();
 
