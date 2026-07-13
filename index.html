@@ -913,13 +913,20 @@ async function doLogin() {
 
   const dniLower = dni.toLowerCase();
 
+  // Misma transformación que se usa al crear/cambiar la cuenta en Firebase Auth
+  // (se rellena hasta 6 caracteres repitiendo el texto, y se corta a 6) — hace
+  // falta reproducirla acá para que el login coincida con la contraseña real
+  // guardada en Firebase Auth, sobre todo en claves de menos de 6 caracteres.
+  function passParaAuth(p) {
+    let r = p;
+    while (r.length < 6) r = r + r;
+    return r.slice(0, 6);
+  }
+
   // Intentar login con Firebase Auth
   const email = (dniLower === 'admin' ? 'admin' : dni) + '@megaclean.com.ar';
-  try {
-    showLoader(true);
-    if (!fbAuth) throw new Error('Firebase no disponible');
-    await fbAuth.signInWithEmailAndPassword(email, pass);
-    // Auth exitoso — cargar perfil del usuario desde Firestore
+
+  async function cargarPerfilYEntrar() {
     const users = await fsList('horas_usuarios');
     showLoader(false);
 
@@ -929,14 +936,28 @@ async function doLogin() {
       if (claveOk) {
         currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni };
         iniciarApp();
-        return;
+        return true;
       }
     }
 
     const user = users.find(u => String(u.dni) === String(dni) && u.activo !== false);
-    if (!user) return toast('Usuario no encontrado en el sistema', 'error');
+    if (!user) { toast('Usuario no encontrado en el sistema', 'error'); return true; }
     currentUser = user;
     iniciarApp();
+    return true;
+  }
+
+  try {
+    showLoader(true);
+    if (!fbAuth) throw new Error('Firebase no disponible');
+    // 1er intento: contraseña tal cual la escribió el usuario (cuentas ya "prolijas")
+    try {
+      await fbAuth.signInWithEmailAndPassword(email, pass);
+    } catch (e1) {
+      // 2do intento: misma versión rellenada/cortada que usa la creación de cuenta
+      await fbAuth.signInWithEmailAndPassword(email, passParaAuth(pass));
+    }
+    await cargarPerfilYEntrar();
 
   } catch(authErr) {
     showLoader(false);
@@ -950,12 +971,16 @@ async function doLogin() {
       }
     }
     // Fallback: login manual sin Firebase Auth (mientras se migran usuarios)
-    const users = await fsList('horas_usuarios');
-    const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
-    if (user) {
-      currentUser = user;
-      iniciarApp();
-    } else {
+    try {
+      const users = await fsList('horas_usuarios');
+      const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
+      if (user) {
+        currentUser = user;
+        iniciarApp();
+      } else {
+        toast('DNI o contraseña incorrectos', 'error');
+      }
+    } catch(e2) {
       toast('DNI o contraseña incorrectos', 'error');
     }
   }
