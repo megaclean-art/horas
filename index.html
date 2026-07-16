@@ -365,7 +365,7 @@
       </svg>
       <div>
         <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;letter-spacing:2px;color:var(--accent);line-height:1">MegaClean</div>
-        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.4</span></div>
+        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.5</span></div>
       </div>
     </div>
     <div class="topbar-user">
@@ -402,7 +402,7 @@ const API = `https://firestore.googleapis.com/v1/projects/${FB_CONFIG.projectId}
 // ════════════════════════════════════════════
 //  VERSIÓN DE LA APP (chequeo forzado, bypass de SW/caché)
 // ════════════════════════════════════════════
-const APP_VERSION = '42.6.4';
+const APP_VERSION = '42.6.5';
 
 // ════════════════════════════════════════════
 //  ESTADO GLOBAL
@@ -769,14 +769,24 @@ function _clearSS(col) {
   } catch(e) {}
 }
 
+let _ultimoErrorFS = null; // guarda el último error real de Firestore para diagnóstico
+
 async function fsListPage(col, pageToken) {
   const url = `${API}/${col}?pageSize=300${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
   try {
     const headers = await getAuthHeaders();
     const r = await fetch(url, { headers });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      let bodyMsg = '';
+      try { const j = await r.json(); bodyMsg = j?.error?.message || ''; } catch(e) {}
+      _ultimoErrorFS = { col, status: r.status, msg: bodyMsg };
+      console.warn('[Firestore] Error', col, r.status, bodyMsg);
+      return null;
+    }
     return await r.json();
   } catch(e) {
+    _ultimoErrorFS = { col, status: 0, msg: String(e?.message || e) };
+    console.warn('[Firestore] Excepción de red', col, e);
     return null;
   }
 }
@@ -802,16 +812,26 @@ async function fsList(col) {
   let allDocs = [];
   let pageToken = '';
   let safety = 0;
+  let huboError = false;
 
   do {
     const data = await fsListPage(col, pageToken);
-    if (!data) break;
+    if (!data) { huboError = true; break; }
     if (data.documents) allDocs = allDocs.concat(data.documents.map(fromFS));
     pageToken = data.nextPageToken || '';
     if (pageToken) await new Promise(res => setTimeout(res, 200));
     safety++;
     if (safety > 15) break;
   } while (pageToken);
+
+  // Si falló el pedido (red, permisos, cuota), NO cachear un resultado vacío/parcial:
+  // así el próximo intento vuelve a pedirlo en vez de mostrar "sin datos" por 5 minutos.
+  if (huboError) {
+    if (_ultimoErrorFS) {
+      toast(`⚠ Error cargando ${col.replace('horas_','')}: ${_ultimoErrorFS.status} ${_ultimoErrorFS.msg || ''}`.trim(), 'error');
+    }
+    return allDocs; // devolvemos lo que se llegó a traer, pero sin persistir en caché
+  }
 
   _fsCache[col] = allDocs;
   _fsCacheTime[col] = now;
