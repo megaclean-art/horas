@@ -365,7 +365,7 @@
       </svg>
       <div>
         <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;letter-spacing:2px;color:var(--accent);line-height:1">MegaClean</div>
-        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.5</span></div>
+        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.6</span></div>
       </div>
     </div>
     <div class="topbar-user">
@@ -402,7 +402,7 @@ const API = `https://firestore.googleapis.com/v1/projects/${FB_CONFIG.projectId}
 // ════════════════════════════════════════════
 //  VERSIÓN DE LA APP (chequeo forzado, bypass de SW/caché)
 // ════════════════════════════════════════════
-const APP_VERSION = '42.6.5';
+const APP_VERSION = '42.6.6';
 
 // ════════════════════════════════════════════
 //  ESTADO GLOBAL
@@ -1009,6 +1009,8 @@ async function doLogin() {
 
   } catch(authErr) {
     showLoader(false);
+    console.warn('[Auth] Falló Firebase Auth:', authErr?.code, authErr?.message);
+    toast(`⚠ Auth falló: ${authErr?.code || 'sin código'} — usando modo local`, 'warn');
     // Si falla Firebase Auth, intentar login legacy (para admin hardcoded)
     if (dniLower === 'admin' || dni === '25365716') {
       const claveOk = (dniLower === 'admin' && pass === 'admin1234') || (dni === '25365716' && pass === '1945');
