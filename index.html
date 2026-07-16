@@ -365,7 +365,7 @@
       </svg>
       <div>
         <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;letter-spacing:2px;color:var(--accent);line-height:1">MegaClean</div>
-        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.3</span></div>
+        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.4</span></div>
       </div>
     </div>
     <div class="topbar-user">
@@ -398,6 +398,11 @@ const FB_CONFIG = {
   appId: "1:446418900871:web:b178a54ceeb66944882522"
 };
 const API = `https://firestore.googleapis.com/v1/projects/${FB_CONFIG.projectId}/databases/(default)/documents`;
+
+// ════════════════════════════════════════════
+//  VERSIÓN DE LA APP (chequeo forzado, bypass de SW/caché)
+// ════════════════════════════════════════════
+const APP_VERSION = '42.6.4';
 
 // ════════════════════════════════════════════
 //  ESTADO GLOBAL
@@ -640,6 +645,50 @@ function aplicarActualizacionApp() {
   // El nuevo Service Worker ya tomó el control (skipWaiting + clients.claim en sw.js).
   // Solo falta recargar para que la página use el JS/HTML nuevo.
   window.location.reload();
+}
+
+// Chequeo de versión independiente del ciclo de vida del Service Worker.
+// Sirve para destrabar dispositivos con un SW pegado que nunca dispara 'updatefound'.
+async function chequearVersionForzada() {
+  try {
+    const res = await fetch('/horas/version.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.version && data.version !== APP_VERSION) {
+      console.warn('[Update] Versión desactualizada detectada:', APP_VERSION, '→', data.version);
+      // Evitar loop infinito de recargas si algo queda mal configurado
+      const intentos = parseInt(sessionStorage.getItem('_upd_intentos') || '0', 10);
+      if (intentos >= 2) {
+        console.warn('[Update] Ya se intentó forzar actualización varias veces, se detiene.');
+        return;
+      }
+      sessionStorage.setItem('_upd_intentos', String(intentos + 1));
+      await forzarActualizacionCompleta();
+    } else {
+      sessionStorage.removeItem('_upd_intentos');
+    }
+  } catch (e) {
+    // Sin conexión o falló el fetch de version.json — seguimos con lo que ya está cargado
+  }
+}
+
+async function forzarActualizacionCompleta() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) {
+    console.warn('[Update] Error limpiando SW/caché:', e);
+  } finally {
+    const url = new URL(window.location.href);
+    url.searchParams.set('_upd', Date.now());
+    window.location.replace(url.toString());
+  }
 }
 
 function initActualizacionApp(reg) {
@@ -913,20 +962,13 @@ async function doLogin() {
 
   const dniLower = dni.toLowerCase();
 
-  // Misma transformación que se usa al crear/cambiar la cuenta en Firebase Auth
-  // (se rellena hasta 6 caracteres repitiendo el texto, y se corta a 6) — hace
-  // falta reproducirla acá para que el login coincida con la contraseña real
-  // guardada en Firebase Auth, sobre todo en claves de menos de 6 caracteres.
-  function passParaAuth(p) {
-    let r = p;
-    while (r.length < 6) r = r + r;
-    return r.slice(0, 6);
-  }
-
   // Intentar login con Firebase Auth
   const email = (dniLower === 'admin' ? 'admin' : dni) + '@megaclean.com.ar';
-
-  async function cargarPerfilYEntrar() {
+  try {
+    showLoader(true);
+    if (!fbAuth) throw new Error('Firebase no disponible');
+    await fbAuth.signInWithEmailAndPassword(email, pass);
+    // Auth exitoso — cargar perfil del usuario desde Firestore
     const users = await fsList('horas_usuarios');
     showLoader(false);
 
@@ -936,28 +978,14 @@ async function doLogin() {
       if (claveOk) {
         currentUser = { _id: 'admin', nombre: 'Administrador', rol: 'ADMIN', dni };
         iniciarApp();
-        return true;
+        return;
       }
     }
 
     const user = users.find(u => String(u.dni) === String(dni) && u.activo !== false);
-    if (!user) { toast('Usuario no encontrado en el sistema', 'error'); return true; }
+    if (!user) return toast('Usuario no encontrado en el sistema', 'error');
     currentUser = user;
     iniciarApp();
-    return true;
-  }
-
-  try {
-    showLoader(true);
-    if (!fbAuth) throw new Error('Firebase no disponible');
-    // 1er intento: contraseña tal cual la escribió el usuario (cuentas ya "prolijas")
-    try {
-      await fbAuth.signInWithEmailAndPassword(email, pass);
-    } catch (e1) {
-      // 2do intento: misma versión rellenada/cortada que usa la creación de cuenta
-      await fbAuth.signInWithEmailAndPassword(email, passParaAuth(pass));
-    }
-    await cargarPerfilYEntrar();
 
   } catch(authErr) {
     showLoader(false);
@@ -971,16 +999,12 @@ async function doLogin() {
       }
     }
     // Fallback: login manual sin Firebase Auth (mientras se migran usuarios)
-    try {
-      const users = await fsList('horas_usuarios');
-      const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
-      if (user) {
-        currentUser = user;
-        iniciarApp();
-      } else {
-        toast('DNI o contraseña incorrectos', 'error');
-      }
-    } catch(e2) {
+    const users = await fsList('horas_usuarios');
+    const user = users.find(u => String(u.dni) === String(dni) && u.password === pass && u.activo !== false);
+    if (user) {
+      currentUser = user;
+      iniciarApp();
+    } else {
       toast('DNI o contraseña incorrectos', 'error');
     }
   }
@@ -8515,6 +8539,10 @@ async function logisticaToggle(servicioId, nombreServicio, mes) {
 //  INIT
 // ════════════════════════════════════════════
 window.addEventListener('load', () => {
+  // Chequeo forzado de versión — corre siempre, incluso si el SW está pegado
+  if (location.hostname === 'megaclean-art.github.io') {
+    chequearVersionForzada();
+  }
   // Registrar Service Worker solo en GitHub Pages
   if ('serviceWorker' in navigator && location.hostname === 'megaclean-art.github.io') {
     navigator.serviceWorker.register('/horas/sw.js')
