@@ -365,7 +365,7 @@
       </svg>
       <div>
         <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;letter-spacing:2px;color:var(--accent);line-height:1">MegaClean</div>
-        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.7</span></div>
+        <div class="topbar-apptag">Gestión de Horas <span style="opacity:.5;font-weight:400">· v42.6.8</span></div>
       </div>
     </div>
     <div class="topbar-user">
@@ -402,7 +402,7 @@ const API = `https://firestore.googleapis.com/v1/projects/${FB_CONFIG.projectId}
 // ════════════════════════════════════════════
 //  VERSIÓN DE LA APP (chequeo forzado, bypass de SW/caché)
 // ════════════════════════════════════════════
-const APP_VERSION = '42.6.7';
+const APP_VERSION = '42.6.8';
 
 // ════════════════════════════════════════════
 //  ESTADO GLOBAL
@@ -962,6 +962,18 @@ async function getAuthHeaders() {
   return { 'Content-Type': 'application/json' };
 }
 
+// Firebase Auth exige contraseñas de mínimo 6 caracteres. Los operarios usan
+// códigos cortos (3-4 dígitos), así que derivamos una contraseña sintética
+// determinística repitiendo el código hasta llegar a 6 caracteres y truncando.
+// El usuario sigue tipeando su código corto; esto es solo para la sesión
+// real de Firebase Auth por detrás. MISMA LÓGICA usada en el script de
+// migración inicial — si se cambia acá, hay que re-migrar las cuentas.
+function derivarPassAuth(pass) {
+  let p = String(pass || '');
+  while (p.length < 6) p = p + p;
+  return p.slice(0, 6);
+}
+
 function togglePassVis() {
   const inp = document.getElementById('login-pass');
   const ico = document.getElementById('eye-icon');
@@ -984,10 +996,11 @@ async function doLogin() {
 
   // Intentar login con Firebase Auth
   const email = (dniLower === 'admin' ? 'admin' : dni) + '@megaclean.com.ar';
+  const passAuth = derivarPassAuth(pass);
   try {
     showLoader(true);
     if (!fbAuth) throw new Error('Firebase no disponible');
-    await fbAuth.signInWithEmailAndPassword(email, pass);
+    await fbAuth.signInWithEmailAndPassword(email, passAuth);
     // Auth exitoso — cargar perfil del usuario desde Firestore
     const users = await fsList('horas_usuarios');
     showLoader(false);
@@ -3921,9 +3934,7 @@ async function guardarEditarAcceso(id, dniAnterior) {
   if (passNueva) {
     // Intentar actualizar contraseña en Firebase Auth
     const email = dni + '@megaclean.com.ar';
-    let passAuth = passNueva;
-    while (passAuth.length < 6) passAuth = passAuth + passAuth;
-    passAuth = passAuth.slice(0,6);
+    const passAuth = derivarPassAuth(passNueva);
     try {
       const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`, {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -3992,9 +4003,7 @@ async function guardarNuevaPass(id, dni) {
   // 2. Actualizar en Firebase Auth
   const API_KEY = 'AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng';
   const email = dni + '@megaclean.com.ar';
-  let passAuth = pass;
-  while (passAuth.length < 6) passAuth = passAuth + passAuth;
-  passAuth = passAuth.slice(0,6);
+  const passAuth = derivarPassAuth(pass);
 
   try {
     // Intentar actualizar via signIn + updatePassword
@@ -4074,9 +4083,7 @@ async function guardarNuevoAcceso(rol) {
   // Crear en Firebase Auth
   const API_KEY = 'AIzaSyBg7lvQteUOaHwEyI1qe1OUPK81-9DL0Ng';
   const email = dni + '@megaclean.com.ar';
-  let passAuth = pass;
-  while (passAuth.length < 6) passAuth = passAuth + passAuth;
-  passAuth = passAuth.slice(0,6);
+  const passAuth = derivarPassAuth(pass);
 
   await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`, {
     method: 'POST',
